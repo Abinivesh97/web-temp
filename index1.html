@@ -1,0 +1,164 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Full Dashboard Layout (Wide B1/B2)</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    body { background: linear-gradient(120deg, #1a252f 0%, #22344a 100%);}
+    .dropdown-content {
+      display: none;
+      position: absolute;
+      left: 0; right: 0; top: 105%;
+      z-index: 30;
+    }
+    .dropdown.open .dropdown-content { display: block; }
+    .dropdown-btn {
+      background: linear-gradient(90deg, #44ffd1 0, #22d3ee 100%);
+      color: #163244;
+      border-radius: 1rem;
+      padding: 1.2rem 1.6rem;
+      font-size: 1.18rem;
+      font-weight: 800;
+      border: 2px solid #22d3ee99;
+      outline: none;
+      width: 100%;
+      min-width: 0;
+      transition: box-shadow .2s;
+      box-shadow: 0 2px 12px #22d3ee22;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .dropdown-arrow { transition: transform 0.2s; }
+    .dropdown.open .dropdown-arrow { transform: rotate(180deg);}
+    .dropdown-menu {
+      background: #233040;
+      border-radius: 0.8rem;
+      box-shadow: 0 8px 24px #22d3ee66;
+      padding: 0.8rem 0.4rem;
+      border: 1.5px solid #22d3eecc;
+      width: 100%;
+      display: flex;
+      flex-direction: column;
+      gap: 0.7rem;
+    }
+    .dropdown-item {
+      background: linear-gradient(90deg,#22d3ee 0,#44ffd1 100%);
+      color: #112a2e;
+      border-radius: 0.7rem;
+      font-size: 1.08rem;
+      font-weight: 700;
+      padding: 1.1rem 1rem;
+      border: none;
+      cursor: pointer;
+      text-align: center;
+      width: 100%;
+      transition: background 0.2s, color 0.2s;
+    }
+    .dropdown-item:hover {
+      background: linear-gradient(90deg,#44ffd1 0,#22d3ee 100%);
+      color: #13334b;
+    }
+    .wide-btn {
+      width: 100%;
+      padding: 1.15rem 0;
+      font-size: 1.23rem;
+      font-weight: 800;
+      border-radius: 1.1rem;
+      margin-bottom: 0.5rem;
+    }
+    @media (max-width: 900px) {
+      .main-row, .footer-row, .top-row { flex-direction: column; gap: 1rem;}
+      .center-col, .ppt-box, .dropdown-btn, .dropdown-menu, .dropdown-item, .wide-btn { max-width: 100vw !important; }
+      .footer-row textarea { min-width: 0 !important; }
+      .top-row > * { width: 100% !important; }
+    }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col">
+  <!-- Title + Buttons Row -->
+  <div class="w-full flex flex-row items-center justify-between gap-0 px-0 pt-7 pb-2 top-row">
+    <div class="flex-[3]">
+      <div class="text-5xl font-extrabold text-[#44ffd1] bg-[#19232b]/80 px-0 py-4 rounded-xl shadow text-center w-full">
+        Title
+      </div>
+    </div>
+    <div class="flex-[1] flex flex-row gap-3 justify-center px-2">
+      <button class="bg-gradient-to-r from-[#22d3ee] to-[#44ffd1] text-[#13334b] wide-btn shadow hover:scale-105 transition">B1</button>
+    </div>
+    <div class="flex-[1] flex flex-row gap-3 justify-center px-2">
+      <button class="bg-gradient-to-r from-[#22d3ee] to-[#44ffd1] text-[#13334b] wide-btn shadow hover:scale-105 transition">B2</button>
+    </div>
+  </div>
+  <!-- Main Row: Centered stack, full width -->
+  <div class="flex-1 flex flex-row items-start justify-center w-full px-0 mt-0 main-row">
+    <div class="flex flex-col items-center justify-start w-full max-w-4xl mx-auto center-col">
+      <!-- Dropdown 1 -->
+      <div class="relative dropdown w-full mb-4" id="dropdown1">
+        <button class="dropdown-btn" type="button">
+          <span>Dropdown with 8 Btn</span>
+          <svg class="dropdown-arrow ml-3" width="28" height="28" fill="none" stroke="#134d4c" stroke-width="3">
+            <path d="M8 12l6 6 6-6" stroke-linecap="round"/>
+          </svg>
+        </button>
+        <div class="dropdown-content w-full">
+          <div class="dropdown-menu">
+            <button class="dropdown-item">Option 1</button>
+            <button class="dropdown-item">Option 2</button>
+            <button class="dropdown-item">Option 3</button>
+            <button class="dropdown-item">Option 4</button>
+            <button class="dropdown-item">Option 5</button>
+            <button class="dropdown-item">Option 6</button>
+            <button class="dropdown-item">Option 7</button>
+            <button class="dropdown-item">Option 8</button>
+          </div>
+        </div>
+      </div>
+      <!-- Dropdown 2 -->
+      <div class="relative dropdown w-full mb-7" id="dropdown2">
+        <button class="dropdown-btn" type="button">
+          <span>Dropdown with 6 Btn</span>
+          <svg class="dropdown-arrow ml-3" width="28" height="28" fill="none" stroke="#134d4c" stroke-width="3">
+            <path d="M8 12l6 6 6-6" stroke-linecap="round"/>
+          </svg>
+        </button>
+        <div class="dropdown-content w-full">
+          <div class="dropdown-menu">
+            <button class="dropdown-item">Option 1</button>
+            <button class="dropdown-item">Option 2</button>
+            <button class="dropdown-item">Option 3</button>
+            <button class="dropdown-item">Option 4</button>
+            <button class="dropdown-item">Option 5</button>
+            <button class="dropdown-item">Option 6</button>
+          </div>
+        </div>
+      </div>
+      <!-- PPT/content box -->
+      <div class="bg-gradient-to-br from-[#34e6c7]/90 via-[#22d3ee]/60 to-[#0e3b58]/90 border-2 border-[#22d3ee] rounded-3xl shadow-2xl w-full max-w-4xl min-h-[350px] h-[380px] flex items-center justify-center text-[#17384c] text-4xl font-extrabold select-none ppt-box">
+        PPT / iFrame / Visual
+      </div>
+    </div>
+  </div>
+  <!-- Footer: Two text boxes, full width, no gap -->
+  <div class="flex flex-row w-full gap-0 px-0 pb-0 mt-8 footer-row">
+    <textarea class="flex-1 bg-[#171f24]/95 border-2 border-[#22d3ee] rounded-xl text-lg text-[#e2fffc] p-6 shadow resize-y min-h-[80px] max-h-[140px] font-bold" style="border-right-width:4px; border-radius: 0 1.1rem 1.1rem 0;" placeholder="Text box 1"></textarea>
+    <textarea class="flex-1 bg-[#171f24]/95 border-2 border-[#22d3ee] rounded-xl text-lg text-[#e2fffc] p-6 shadow resize-y min-h-[80px] max-h-[140px] font-bold" style="border-left-width:4px; border-radius: 1.1rem 0 0 1.1rem;" placeholder="Text box 2"></textarea>
+  </div>
+  <script>
+    // Dropdown logic
+    document.querySelectorAll('.dropdown').forEach(drop => {
+      const btn = drop.querySelector('.dropdown-btn');
+      btn.onclick = e => {
+        document.querySelectorAll('.dropdown').forEach(d2 => {
+          if (d2 !== drop) d2.classList.remove('open');
+        });
+        drop.classList.toggle('open');
+        e.stopPropagation();
+      }
+    });
+    window.onclick = () => document.querySelectorAll('.dropdown').forEach(d=>d.classList.remove('open'));
+  </script>
+</body>
+</html>
