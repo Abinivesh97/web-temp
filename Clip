@@ -1,0 +1,49 @@
+import pandas as pd
+import os
+
+# Configuration
+folder_path = "your/folder/path"
+master_file = "Master_sheet.xlsx"
+master_sheet_name = "Sheet1"
+unique_cols = ['Assigned To', 'Contributor', 'Project Type', 'Project STR Code', 'CSM']
+master_path = os.path.join(folder_path, master_file)
+
+# Utility to normalize values for duplicate check
+def normalize_value(val):
+    return str(val).strip().lower()
+
+# Load or initialize master
+if os.path.exists(master_path):
+    master_df = pd.read_excel(master_path, sheet_name=master_sheet_name)
+else:
+    master_df = pd.DataFrame()
+
+# Prepare keys from master
+if not master_df.empty and all(col in master_df.columns for col in unique_cols):
+    master_keys = set(master_df[unique_cols].applymap(normalize_value).agg('|'.join, axis=1))
+else:
+    master_keys = set()
+
+# Loop through all CSVs
+for filename in os.listdir(folder_path):
+    if filename.endswith(".csv"):
+        csv_path = os.path.join(folder_path, filename)
+        df = pd.read_csv(csv_path)
+
+        # Skip if key columns are missing
+        if not all(col in df.columns for col in unique_cols):
+            continue
+
+        # Generate row keys
+        df['row_key'] = df[unique_cols].applymap(normalize_value).agg('|'.join, axis=1)
+
+        # Filter new rows
+        new_rows = df[~df['row_key'].isin(master_keys)].drop(columns='row_key')
+
+        # Append only new unique rows
+        if not new_rows.empty:
+            master_df = pd.concat([master_df, new_rows], ignore_index=True)
+            master_keys.update(new_rows[unique_cols].applymap(normalize_value).agg('|'.join, axis=1))
+
+# Save updated master
+master_df.to_excel(master_path, index=False, sheet_name=master_sheet_name)
