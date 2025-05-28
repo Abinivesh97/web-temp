@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Dropdown Global Blur</title>
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <style>
+    html, body { height: 100%; background: #fff; }
+    body { min-height: 100vh; }
+    /* Fullscreen blur overlay */
+    .blur-overlay {
+      position: fixed;
+      inset: 0;
+      background: rgba(255,255,255,0.4);
+      backdrop-filter: blur(10px);
+      z-index: 40;
+      opacity: 0;
+      pointer-events: none;
+      transition: opacity 0.3s cubic-bezier(.4,0,.2,1);
+    }
+    .blur-overlay.active {
+      opacity: 1;
+      pointer-events: auto;
+    }
+    /* Dropdown styling */
+    .dropdown-btn {
+      background: #fff;
+      color: #111;
+      border-radius: 1.2rem;
+      padding: 1.1rem 1.3rem;
+      font-size: 1.22rem;
+      font-weight: 900;
+      border: 2px solid #ffffff;
+      width: 100%;
+      min-width: 0;
+      box-shadow: 0 2px 12px #0003;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      position: relative;
+      z-index: 50;
+    }
+    .dropdown-arrow { transition: transform 0.2s;}
+    .dropdown.open .dropdown-arrow { transform: rotate(180deg);}
+    .dropdown-menu {
+      margin-top: 1.2rem;
+      width: 100%;
+      max-height: 340px;
+      overflow-y: auto;
+      background: #fff;
+      border-radius: 0.9rem;
+      box-shadow: 0 4px 18px #0007;
+      border: 2px solid #ffffff;
+      display: flex;
+      flex-direction: column;
+      gap: 0.8rem;
+      padding: 1rem 0.7rem;
+      position: absolute;
+      left: 0;
+      right: 0;
+      z-index: 51;
+      animation: fadein 0.18s;
+    }
+    @keyframes fadein { from { opacity: 0; transform: translateY(-15px);} to {opacity: 1; transform: none;} }
+    .dropdown-item {
+      background: #fff;
+      color: #000;
+      border-radius: 0.8rem;
+      font-size: 1.08rem;
+      font-weight: 700;
+      padding: 1.1rem 1rem;
+      border: 1.5px solid rgba(0, 0, 0, 0.133);
+      cursor: pointer;
+      text-align: center;
+      width: 100%;
+      transition: background 0.18s, color 0.18s, border 0.18s;
+    }
+    .dropdown-item:hover {
+      background: #eee;
+      border: 1.5px solid #000;
+      color: #000;
+    }
+    .wide-btn {
+      width: 100%;
+      padding: 1.45rem 0;
+      font-size: 1.35rem;
+      font-weight: 800;
+      border-radius: 1.1rem;
+      background: #fff;
+      color: #000;
+      box-shadow: 0 4px 12px #0006;
+      border: 2px solid #ffffff;
+      transition: box-shadow .18s;
+    }
+    .wide-btn:active, .wide-btn:focus {
+      box-shadow: 0 4px 24px #000b;
+    }
+    .footer-static {
+      background: #fff;
+      color: #000;
+      border: 2px solid #ffffff;
+      border-radius: 1.2rem;
+      font-size: 1.18rem;
+      font-weight: 700;
+      box-shadow: 0 2px 16px #0003;
+      padding: 2rem 2.5rem;
+      min-height: 80px;
+      max-height: 180px;
+      margin-bottom: 1rem;
+      width: 100%;
+      resize: none;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .footer-row { gap: 2.2rem; }
+    /* Remove the cards */
+    .card { background: transparent !important; border: none !important; box-shadow: none !important; }
+    @media (max-width: 1000px) {
+      .main-grid { grid-template-columns: 1fr !important; }
+      .footer-row { flex-direction: column; gap: 1.2rem; }
+    }
+  </style>
+</head>
+<body class="min-h-screen flex flex-col">
+  <!-- BLUR OVERLAY -->
+  <div id="blurOverlay" class="blur-overlay"></div>
+  <!-- Header -->
+  <div class="w-full flex flex-row items-center justify-between gap-6 px-12 pt-6 pb-2">
+    <div class="flex-shrink-0 flex-grow-0" style="width: 22%;">
+      <div class="text-6xl font-extrabold text-black px-0 py-4 rounded-xl shadow text-center w-full">
+        Title
+      </div>
+    </div>
+    <div class="flex-1"></div>
+    <div class="flex flex-row gap-8 justify-end" style="width: 47%;">
+      <button class="wide-btn shadow hover:scale-105 transition" style="box-shadow: #000;">B1</button>
+      <button class="wide-btn shadow hover:scale-105 transition">B2</button>
+    </div>
+  </div>
+  <!-- Main area: Grid, fills screen -->
+  <div class="w-full flex-1 grid main-grid" style="grid-template-columns: 22% 22% 1fr; min-height: 420px; gap: 2.5rem; padding: 2.5rem 2.5rem 0 2.5rem;">
+    <!-- Box 1: Dropdown at top INSIDE grid cell (no card!) -->
+    <div class="flex flex-col h-full p-5 relative" id="card1">
+      <div class="dropdown w-full" id="dropdown1" style="position:relative;z-index:50;">
+        <button class="dropdown-btn font-bold" type="button">
+          <span>Dropdown with 8 Btn</span>
+          <svg class="dropdown-arrow ml-3" width="32" height="32" fill="none" stroke="#000" stroke-width="3">
+            <path d="M8 12l6 6 6-6" stroke-linecap="round"/>
+          </svg>
+        </button>
+        <div class="dropdown-menu mt-0 hidden">
+          <button class="dropdown-item">Option 1</button>
+          <button class="dropdown-item">Option 2</button>
+          <button class="dropdown-item">Option 3</button>
+          <button class="dropdown-item">Option 4</button>
+          <button class="dropdown-item">Option 5</button>
+          <button class="dropdown-item">Option 6</button>
+          <button class="dropdown-item">Option 7</button>
+          <button class="dropdown-item">Option 8</button>
+        </div>
+      </div>
+      <div class="flex-1 flex items-center justify-center text-2xl font-bold text-black mt-6">
+        This is card 1 content. <br> The area blurs when dropdown is open.
+      </div>
+    </div>
+    <!-- Box 2: Dropdown at top INSIDE grid cell (no card!) -->
+    <div class="flex flex-col h-full p-5 relative" id="card2">
+      <div class="dropdown w-full" id="dropdown2" style="position:relative;z-index:50;">
+        <button class="dropdown-btn font-bold" type="button">
+          <span>Dropdown with 6 Btn</span>
+          <svg class="dropdown-arrow ml-3" width="32" height="32" fill="none" stroke="#000" stroke-width="3">
+            <path d="M8 12l6 6 6-6" stroke-linecap="round"/>
+          </svg>
+        </button>
+        <div class="dropdown-menu mt-0 hidden">
+          <button class="dropdown-item">Option 1</button>
+          <button class="dropdown-item">Option 2</button>
+          <button class="dropdown-item">Option 3</button>
+          <button class="dropdown-item">Option 4</button>
+          <button class="dropdown-item">Option 5</button>
+          <button class="dropdown-item">Option 6</button>
+        </div>
+      </div>
+      <div class="flex-1 flex items-center justify-center text-2xl font-bold text-black mt-6">
+        This is card 2 content. <br> The area blurs when dropdown is open.
+      </div>
+    </div>
+    <!-- PPT Box -->
+    <div class="flex flex-col h-full">
+      <div class="flex flex-col items-center justify-center h-full w-full">
+        <div class="flex-1 flex items-center justify-center w-full">
+          <div class="text-black text-5xl font-extrabold select-none"><iframe src="https://docs.google.com/presentation/d/e/2PACX-1vQ7I19lPrbk1Rxwrj1yYa3tm1lLLHJquspYaNJaFVxVnh7nA5kuaYlReo2WySWjm-1hj6NcFxgYbgg8/pubembed?start=false&loop=false&delayms=3000" frameborder="0" width="960" height="569" allowfullscreen="true" mozallowfullscreen="true" webkitallowfullscreen="true"></iframe></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <!-- Footer: Static text boxes, more gap, not editable -->
+  <div class="flex flex-row w-full px-8 pb-0 mt-10 footer-row">
+    <div class="flex-1 footer-static shadow" style="border-right-width:4px; border-radius: 0 1.2rem 1.2rem 0;">Text box 1 (static, not editable)</div>
+    <div class="flex-1 footer-static shadow" style="border-left-width:4px; border-radius: 1.2rem 0 0 1.2rem;">Text box 2 (static, not editable)</div>
+  </div>
+  <script>
+    // Blur logic
+    function showBlur() {
+      document.getElementById('blurOverlay').classList.add('active');
+    }
+    function hideBlur() {
+      document.getElementById('blurOverlay').classList.remove('active');
+    }
+    // Open/close dropdown logic (only one at a time)
+    document.querySelectorAll('.dropdown').forEach(drop => {
+      const btn = drop.querySelector('.dropdown-btn');
+      const menu = drop.querySelector('.dropdown-menu');
+      btn.onclick = e => {
+        const wasOpen = !menu.classList.contains('hidden');
+        // Close all dropdowns first
+        document.querySelectorAll('.dropdown-menu').forEach(m => m.classList.add('hidden'));
+        // Open blur and menu if not already open
+        if(!wasOpen) {
+          menu.classList.remove('hidden');
+          showBlur();
+        } else {
+          hideBlur();
+        }
+        e.stopPropagation();
+      }
+    });
+    // Click blur closes all
+    document.getElementById('blurOverlay').onclick = () => {
+      document.querySelectorAll('.dropdown-menu').forEach(menu => menu.classList.add('hidden'));
+      hideBlur();
+    };
+    // Click outside any dropdown closes all
+    window.onclick = function(e) {
+      if(!e.target.closest('.dropdown')) {
+        document.querySelectorAll('.dropdown-menu').forEach(menu => menu.classList.add('hidden'));
+        hideBlur();
+      }
+    };
+    // Esc closes
+    window.addEventListener('keydown', e => {
+      if (e.key === 'Escape') {
+        document.querySelectorAll('.dropdown-menu').forEach(menu => menu.classList.add('hidden'));
+        hideBlur();
+      }
+    });
+  </script>
+</body>
+</html>
