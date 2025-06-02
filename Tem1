@@ -1,0 +1,197 @@
+# capacity_forecast.py  ─────────────────────────────────────────────
+import pandas as pd
+import numpy as np
+from pathlib import Path
+from datetime import timedelta
+from sklearn.model_selection import TimeSeriesSplit
+from sklearn.preprocessing import LabelEncoder
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import mean_absolute_error
+import warnings
+
+warnings.filterwarnings("ignore")
+
+DATA_FILE = Path("dummy_employee_project_data_2020_2025_20k.xlsx")  # <-- change path if needed
+UTILISATION_TARGET = 0.94       # 94 %
+N_WEEKS_IN_MONTH   = 4
+
+# ───────────────────────────────────────────────────────────────────
+# 1. LOAD  📥
+df_str  = pd.read_excel(DATA_FILE, sheet_name="STR")
+df_core = pd.read_excel(DATA_FILE, sheet_name="CoreAlm")
+
+df_str["Week"] = pd.to_datetime(df_str["Week"])
+df_str = df_str.sort_values(["ResourceEmail", "Week"]).reset_index(drop=True)
+
+# ───────────────────────────────────────────────────────────────────
+# 2. FEATURE ENGINEERING  🏗️
+def add_lags_rolls(frame, lags=(1,2,3,4), rolls=(4,8,12)):
+    for l in lags:
+        frame[f"lag{l}"] = (
+            frame.groupby("ResourceEmail")["TotalHoursByWeek"].shift(l)
+        )
+    for r in rolls:
+        frame[f"roll{r}"] = (
+            frame.groupby("ResourceEmail")["TotalHoursByWeek"]
+            .shift(1).rolling(r, min_periods=1).mean()
+        )
+    return frame
+
+df_feat = add_lags_rolls(df_str.copy())
+df_feat["WeekOfYear"] = df_feat["Week"].dt.isocalendar().week.astype(int)
+df_feat["Year"]       = df_feat["Week"].dt.year
+
+# Drop rows where any required feature is NA (first few weeks of each employee)
+df_feat = df_feat.dropna()
+
+# Encode employee id
+le_emp = LabelEncoder()
+df_feat["EmpID"] = le_emp.fit_transform(df_feat["ResourceEmail"])
+
+X_cols = [c for c in df_feat.columns if c.startswith(("lag","roll","WeekOfYear","Year","EmpID"))]
+y_col  = "TotalHoursByWeek"
+X, y   = df_feat[X_cols], df_feat[y_col]
+
+# ───────────────────────────────────────────────────────────────────
+# 3. TRAIN  🎯  (time-series split)
+try:
+    from xgboost import XGBRegressor
+    model = XGBRegressor(
+        n_estimators=300,
+        learning_rate=0.05,
+        max_depth=6,
+        subsample=0.8,
+        colsample_bytree=0.8,
+        objective="reg:squarederror",
+        n_jobs=-1,
+        random_state=42
+    )
+except ImportError:
+    print("XGBoost not found – falling back to RandomForestRegressor.")
+    model = RandomForestRegressor(
+        n_estimators=400,
+        max_depth=None,
+        n_jobs=-1,
+        random_state=42
+    )
+
+tscv = TimeSeriesSplit(n_splits=5)
+mae_scores = []
+
+for train_idx, val_idx in tscv.split(X):
+    model.fit(X.iloc[train_idx], y.iloc[train_idx])
+    pred_val = model.predict(X.iloc[val_idx])
+    mae_scores.append(mean_absolute_error(y.iloc[val_idx], pred_val))
+
+print(f"Average CV MAE: {np.mean(mae_scores):.2f} hours")
+
+# Fit on full data
+model.fit(X, y)
+
+# ───────────────────────────────────────────────────────────────────
+# 4. PREDICT NEXT WEEK / MONTH  🔮
+latest_weeks = (
+    df_str.sort_values(["ResourceEmail", "Week"])
+          .groupby("ResourceEmail").tail(1)
+          .copy()
+)
+
+# Need lags/rolls relative to the latest week
+def build_future_features(row):
+    # The row is the latest known week; build a synthetic record for week+1
+    future = row.copy()
+    # Shift existing numeric lags
+    for l in (1,2,3,4):
+        future[f"lag{l}"] = row[f"lag{l-1}"] if l > 1 else row["TotalHoursByWeek"]
+    # rolling means: simple approach – keep same values (approx ok for next step)
+    for r in (4,8,12):
+        future[f"roll{r}"] = row[f"roll{r}"]
+    future["Week"] = row["Week"] + timedelta(days=7)
+    future["WeekOfYear"] = future["Week"].isocalendar().week
+    future["Year"]       = future["Week"].year
+    return future
+
+# First recompute lags on full df_str (easier)
+df_full = add_lags_rolls(df_str.copy())
+latest_with_feats = (
+    df_full.sort_values(["ResourceEmail","Week"])
+           .groupby("ResourceEmail").tail(1)
+)
+
+future_rows = latest_with_feats.apply(build_future_features, axis=1)
+future_rows["EmpID"] = le_emp.transform(future_rows["ResourceEmail"])
+X_future = future_rows[X_cols]
+future_rows["PredHoursNextWeek"] = model.predict(X_future)
+
+# Next-month hours ≈ next-week × 4  (quick proxy)
+future_rows["PredHoursNextMonth"] = future_rows["PredHoursNextWeek"] * N_WEEKS_IN_MONTH
+
+# ───────────────────────────────────────────────────────────────────
+# 5. CAPACITY & GAP  📊
+n_emp               = future_rows.shape[0]
+capacity_week       = n_emp * 40
+capacity_month      = capacity_week * N_WEEKS_IN_MONTH
+target_week         = UTILISATION_TARGET * capacity_week
+target_month        = UTILISATION_TARGET * capacity_month
+
+forecast_week_hours  = future_rows["PredHoursNextWeek"].sum()
+forecast_month_hours = future_rows["PredHoursNextMonth"].sum()
+
+gap_week  = max(0, target_week  - forecast_week_hours)
+gap_month = max(0, target_month - forecast_month_hours)
+
+print(f"\n—— Utilisation forecast ——")
+print(f"Predicted total next week : {forecast_week_hours:,.0f} h")
+print(f"94% capacity target week  : {target_week:,.0f} h  ➜ Gap = {gap_week:,.0f} h")
+
+print(f"Predicted total next month: {forecast_month_hours:,.0f} h")
+print(f"94% capacity target month : {target_month:,.0f} h  ➜ Gap = {gap_month:,.0f} h")
+
+# ───────────────────────────────────────────────────────────────────
+# 6. HOW MANY NEW PROJECTS?  📈
+# crude average weekly hours contributed by an active project
+avg_proj_week_hours = (
+    df_str.groupby("ProjectCode")["TotalHoursByWeek"].mean().mean()
+)
+
+new_projects_week  = int(np.ceil(gap_week  / avg_proj_week_hours))   if gap_week  else 0
+new_projects_month = int(np.ceil(gap_month / (avg_proj_week_hours*N_WEEKS_IN_MONTH))) if gap_month else 0
+
+print(f"\nNew projects needed ➜  week: {new_projects_week},  month: {new_projects_month}")
+
+# ───────────────────────────────────────────────────────────────────
+# 7. EMPLOYEE LOAD & ASSIGNMENT  👥
+emp_load = (
+    future_rows[["ResourceEmail","PredHoursNextMonth"]]
+    .rename(columns={"PredHoursNextMonth":"ForecastMonthHrs"})
+)
+emp_load["Capacity"]  = 40 * N_WEEKS_IN_MONTH
+emp_load["SpareHrs"]  = emp_load["Capacity"] - emp_load["ForecastMonthHrs"]
+emp_load = emp_load.sort_values("SpareHrs", ascending=False).reset_index(drop=True)
+
+# Greedy drop-in allocation
+hrs_per_new_proj_month = avg_proj_week_hours * N_WEEKS_IN_MONTH
+assignments = {}
+
+for proj in range(new_projects_month):
+    emp_idx = emp_load.index[0]  # employee with most spare hrs
+    if emp_load.loc[emp_idx, "SpareHrs"] <= 0:
+        break  # nobody has room
+    emp_email = emp_load.loc[emp_idx, "ResourceEmail"]
+    assignments.setdefault(emp_email, 0)
+    assignments[emp_email] += 1
+    emp_load.loc[emp_idx, "SpareHrs"] -= hrs_per_new_proj_month
+    emp_load = emp_load.sort_values("SpareHrs", ascending=False)
+
+# ───────────────────────────────────────────────────────────────────
+# 8. SUMMARY OUTPUT  📤
+print("\n—— Suggested project drop-ins (greedy) ——")
+for emp, n_proj in assignments.items():
+    print(f"{emp:35s}  ←  {n_proj} new project(s)")
+
+print("\nTop-10 employee load preview:")
+print(emp_load.head(10)[["ResourceEmail","ForecastMonthHrs","SpareHrs"]])
+
+# (Optional) save detailed tables
+emp_load.to_csv("employee_load_forecast.csv", index=False)
+future_rows.to_csv("weekly_predictions.csv", index=False)
