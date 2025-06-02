@@ -1,0 +1,187 @@
+# capacity_forecast_realdata.py  ─────────────────────────────────────────
+import pandas as pd, numpy as np, re, warnings
+from pathlib import Path
+from datetime import timedelta
+from pandas.tseries.offsets import MonthBegin
+from sklearn.model_selection import TimeSeriesSplit
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.metrics import mean_absolute_error
+
+warnings.filterwarnings("ignore")
+
+# ─────────────── 1. CONFIG ————————————————————————————
+STR_FILE   = Path(r"C:\Users\aseneiva\Documents\python scripts\pmo\str_cleaned.xlsx")
+CORE_FILE  = Path(r"C:\Users\aseneiva\Documents\python scripts\pmo\datasheets\corealm_export\Master_sheet.xlsx")
+
+STR_SHEET  = "Sheet1"         # tab with weekly bookings
+CORE_SHEET = 0                # first sheet in CoreAlm workbook
+
+COL_EMAIL  = "Resource_Email"
+COL_HOURS  = "Total_Hours_By_week"
+COL_WEEK   = "Week"
+
+HOURS_PER_WEEK       = 40          # 8 h × Mon–Fri
+UTILISATION_TARGET   = 0.94
+ASSUMED_WEEKS_MONTH  = 4           # only for nominal capacity
+
+# ─────────────── 2. LOAD & PRE-CLEAN ———————————————————
+def parse_week(val):
+    """Return Timestamp (Monday) or NaT."""
+    if pd.isna(val):
+        return pd.NaT
+    s = str(val).strip()
+    # direct date
+    dt = pd.to_datetime(s, errors="coerce")
+    if not pd.isna(dt):
+        return dt.normalize()
+    # ISO string 2023_W08 / 2023-W08
+    m = re.match(r"^(\d{4})[-_]?W?(\d{2})$", s, flags=re.I)
+    if m:
+        y, w = m.groups()
+        return pd.to_datetime(f"{y}-W{w}-1", format="%G-W%V-%u", errors="coerce")
+    return pd.NaT
+
+df_str  = pd.read_excel(STR_FILE,  sheet_name=STR_SHEET)
+df_core = pd.read_excel(CORE_FILE, sheet_name=CORE_SHEET)
+
+df_str[COL_WEEK] = df_str[COL_WEEK].apply(parse_week)
+df_str = df_str[df_str[COL_WEEK].notna()].copy()
+
+# ─── AGGREGATE → one row per employee × Monday week ────
+df_str = (
+    df_str
+      .groupby([COL_EMAIL, COL_WEEK], as_index=False)[COL_HOURS]
+      .sum()
+      .rename(columns={COL_EMAIL: "ResourceEmail",
+                       COL_HOURS: "TotalHours",
+                       COL_WEEK:  "Week"})
+      .sort_values(["ResourceEmail", "Week"])
+      .reset_index(drop=True)
+)
+# ─────────────────────────────────────────────────────────
+
+# ─────────────── 3. FEATURE HELPERS ———————————————
+def add_lags_rolls(frame, lags=(1,2,3,4), rolls=(4,8,12)):
+    for l in lags:
+        frame[f"lag{l}"] = frame.groupby("ResourceEmail")["TotalHours"].shift(l)
+    for r in rolls:
+        frame[f"roll{r}"] = (
+            frame.groupby("ResourceEmail")["TotalHours"]
+                 .shift(1).rolling(r, min_periods=1).mean()
+        )
+    return frame
+
+def add_iso_cols(frame, date_col="Week"):
+    iso = frame[date_col].dt.isocalendar()
+    if isinstance(iso, pd.DataFrame):     # pandas ≥1.1
+        frame["ISO_Year"]   = iso["year"].astype("float32")
+        frame["WeekOfYear"] = iso["week"].astype("float32")
+    else:                                 # very old pandas
+        frame["ISO_Year"]   = [t[0] for t in iso]
+        frame["WeekOfYear"] = [t[1] for t in iso]
+        frame[["ISO_Year","WeekOfYear"]] = frame[["ISO_Year","WeekOfYear"]].astype("float32")
+    return frame
+
+# ─────────────── 4. BUILD FEATURES & TRAIN ———————————
+df_feat = add_lags_rolls(df_str.copy())
+df_feat = add_iso_cols(df_feat)
+
+emp2id = {e:i for i, e in enumerate(df_feat["ResourceEmail"].unique())}
+df_feat["EmpID"] = df_feat["ResourceEmail"].map(emp2id).astype("float32")
+
+X_cols = (
+    ["WeekOfYear", "ISO_Year", "EmpID"] +
+    [c for c in df_feat.columns if c.startswith(("lag","roll"))]
+)
+
+df_feat = df_feat.dropna(subset=X_cols + ["TotalHours"]).copy()
+df_feat[X_cols] = df_feat[X_cols].astype("float32")
+y = df_feat["TotalHours"].astype("float32")
+X = df_feat[X_cols]
+
+tscv  = TimeSeriesSplit(n_splits=5)
+model = RandomForestRegressor(n_estimators=400, n_jobs=-1, random_state=42)
+
+mae_scores = []
+for tr_idx, val_idx in tscv.split(X):
+    model.fit(X.iloc[tr_idx], y.iloc[tr_idx])
+    mae_scores.append(mean_absolute_error(y.iloc[val_idx],
+                                          model.predict(X.iloc[val_idx])))
+print(f"Average CV MAE: {np.mean(mae_scores):.2f} hours")
+
+model.fit(X, y)   # final fit on all data
+
+# ─────────────── 5. FORECAST NEXT WEEK & MONTH ————————
+latest = (
+    df_feat.sort_values(["ResourceEmail","Week"])
+           .groupby("ResourceEmail").tail(1).copy()
+)
+
+def make_next_week(r):
+    new = r.copy()
+    new["Week"] = (r["Week"] + timedelta(days=7)).normalize()   # next Monday
+    for l in (1,2,3,4):
+        new[f"lag{l}"] = r["TotalHours"] if l == 1 else r[f"lag{l-1}"]
+    return new
+
+future_rows = latest.apply(make_next_week, axis=1)
+future_rows = add_iso_cols(future_rows)
+future_rows["EmpID"] = future_rows["ResourceEmail"].map(emp2id).fillna(-1).astype("float32")
+future_rows[X_cols] = future_rows[X_cols].astype("float32")
+
+future_rows["PredHoursNextWeek"] = model.predict(future_rows[X_cols]).astype("float32")
+
+# scale to exact Mon–Fri work-days in coming month
+start_dates = future_rows["Week"]
+end_dates   = start_dates + MonthBegin(1)        # first work-day next month
+workdays = np.busday_count(
+    start_dates.dt.date.values.astype("datetime64[D]"),
+    end_dates.dt.date.values.astype("datetime64[D]")
+)
+future_rows["PredHoursNextMonth"] = future_rows["PredHoursNextWeek"] * (workdays / 5)
+
+# ─────────────── 6. CAPACITY & GAP ————————————————————
+n_emp          = future_rows.shape[0]
+capacity_week  = n_emp * HOURS_PER_WEEK
+capacity_month = capacity_week * ASSUMED_WEEKS_MONTH
+target_week    = UTILISATION_TARGET * capacity_week
+target_month   = UTILISATION_TARGET * capacity_month
+
+forecast_week  = future_rows["PredHoursNextWeek"].sum()
+forecast_month = future_rows["PredHoursNextMonth"].sum()
+
+gap_week  = max(0, target_week  - forecast_week)
+gap_month = max(0, target_month - forecast_month)
+
+print("\n—— Utilisation forecast ——")
+print(f"Pred total next Mon–Fri : {forecast_week:,.0f} h")
+print(f"94 % capacity target     : {target_week:,.0f} h  →  Gap = {gap_week:,.0f} h")
+print(f"Pred total next month   : {forecast_month:,.0f} h")
+print(f"94 % capacity target    : {target_month:,.0f} h  →  Gap = {gap_month:,.0f} h")
+
+# ─────────────── 7. PROJECTS NEEDED (rough) ——————————
+if "ActualEffort" in df_core.columns:
+    avg_proj_week_hours = df_core["ActualEffort"].mean() / 12
+else:
+    avg_proj_week_hours = 160.0        # fallback
+
+new_proj_week  = int(np.ceil(gap_week  / avg_proj_week_hours)) if gap_week  else 0
+new_proj_month = int(np.ceil(gap_month / (avg_proj_week_hours*ASSUMED_WEEKS_MONTH))) if gap_month else 0
+
+print(f"\nNew projects needed ➜  week: {new_proj_week},  month: {new_proj_month}")
+
+# ─────────────── 8. SPARE-CAPACITY TABLE —————————————
+emp_load = (
+    future_rows[["ResourceEmail", "PredHoursNextMonth"]]
+    .rename(columns={"PredHoursNextMonth": "ForecastMonthHrs"})
+)
+emp_load["Capacity"] = HOURS_PER_WEEK * ASSUMED_WEEKS_MONTH
+emp_load["SpareHrs"] = emp_load["Capacity"] - emp_load["ForecastMonthHrs"]
+emp_load = emp_load.sort_values("SpareHrs", ascending=False).reset_index(drop=True)
+
+print("\nTop-10 employee spare capacity:")
+print(emp_load.head(10))
+
+# (optional) save outputs
+# emp_load.to_csv("emp_capacity_forecast.csv", index=False)
+# future_rows.to_csv("weekly_predictions.csv", index=False)
