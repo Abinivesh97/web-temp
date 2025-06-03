@@ -1,0 +1,338 @@
+
+import re, sys, logging, math, itertools
+from pathlib import Path
+from datetime import timedelta
+import numpy as np
+import pandas as pd
+from pandas.tseries.offsets import Week
+from sklearn.model_selection import TimeSeriesSplit
+from sklearn.metrics import mean_absolute_error
+
+# ────────────────────────── FILE PATHS (EDIT) ────────────────────────────
+STR_PATH   = Path(r"C:\data\STR_cleaned.xlsx")
+CORE_PATH  = Path(r"C:\data\CoreAlm_master.xlsx")
+MILE_PATH  = Path(r"C:\data\Milestone_tracker.xlsx")
+EMP_PATH   = Path(r"C:\data\Employee_Whitelist.xlsx")
+OUT_PATH   = Path(r"capacity_audit.xlsx")          # output workbook
+
+# ────────────────────────── CONFIG CONSTANTS ─────────────────────────────
+RUN_DATE       = pd.Timestamp.today().normalize()  # anchor Monday
+HORIZON_WEEKS  = 4
+UTIL_TARGET    = 0.94
+HOURS_PRE25    = 43
+HOURS_2025_ON  = 40
+LAGS           = (1, 2, 3, 4)
+ROLLS          = (4, 8, 12)
+MAX_MILESTONE_ROWS = 30          # rows in Milestone_Watch sheet
+
+# column aliases
+COL_EMAIL      = "Resource_Email"
+COL_HOURS      = "Total_Hours_By_week"
+COL_WEEK       = "Week"
+COL_STR_PROJ   = "BG_Project_Code"
+COL_CORE_PROJ  = "Project STR Code"
+COL_MILE_PROJ  = "Project_Code"
+
+logging.basicConfig(level=logging.INFO,
+                    format="%(asctime)s | %(levelname)-8s | %(message)s",
+                    datefmt="%H:%M:%S")
+
+try:
+    from xgboost import XGBRegressor
+    USE_XGB = True
+except ImportError:
+    from sklearn.ensemble import RandomForestRegressor
+    USE_XGB = False
+
+ISO_RE = re.compile(r"^(\d{4})[-_]?W?(\d{2})$", re.I)
+
+# ────────────────────────── UTIL HELPERS ─────────────────────────────────
+def assure(path):
+    if not path.exists():
+        logging.error("File not found: %s", path); sys.exit(1)
+
+def load_xlsx(path):
+    assure(path); return pd.read_excel(path)
+
+def parse_week(v):
+    if pd.isna(v): return pd.NaT
+    d = pd.to_datetime(v, errors="coerce")
+    if not pd.isna(d): return d.normalize()
+    m = ISO_RE.match(str(v).strip())
+    if m:
+        y,w = m.groups()
+        return pd.to_datetime(f"{y}-W{w}-1", format="%G-W%V-%u",
+                              errors="coerce")
+    return pd.NaT
+
+def clean_numeric(df, cols):
+    """Return df[cols] as float32 with NaN/±Inf coerced to 0."""
+    return (df[cols]
+              .apply(pd.to_numeric, errors="coerce")
+              .replace([np.inf, -np.inf], np.nan)
+              .fillna(0.0)
+              .astype("float32"))
+
+def feature_engineer(df):
+    for l in LAGS:
+        df[f"lag{l}"] = df.groupby("Employee")["TotalHours"].shift(l)
+    for r in ROLLS:
+        df[f"roll{r}"] = (df.groupby("Employee")["TotalHours"]
+                            .shift(1)
+                            .rolling(r, min_periods=1).mean())
+    iso = df["Week"].dt.isocalendar()
+    df["ISO_Year"]   = iso["year"].astype("float32")
+    df["WeekOfYear"] = iso["week"].astype("float32")
+    return df
+
+# colour helper for Excel
+def add_format(wb, **fmt):
+    return wb.add_format(fmt)
+
+# ────────────────────────── 1. LOAD DATA ────────────────────────────────
+logging.info("Loading workbooks …")
+df_str  = load_xlsx(STR_PATH)
+df_core = load_xlsx(CORE_PATH)
+df_mile = load_xlsx(MILE_PATH)
+df_emp  = load_xlsx(EMP_PATH)
+
+EMP_SET = set(df_emp.iloc[:,0].astype(str))
+
+# ────────────────────────── 2. STR CLEAN + AGG ──────────────────────────
+df_str[COL_WEEK] = df_str[COL_WEEK].apply(parse_week)
+df_str = df_str[df_str[COL_WEEK].notna()]
+df_str = df_str[df_str[COL_EMAIL].astype(str).isin(EMP_SET)]
+
+proj_week = (df_str.groupby([COL_STR_PROJ, COL_WEEK], as_index=False)
+                     [COL_HOURS].sum().query(f"{COL_HOURS} > 0"))
+MED_WK_H = proj_week[COL_HOURS].median()
+logging.info("Median project weekly hours = %.1f", MED_WK_H)
+
+df_str = (df_str.groupby([COL_EMAIL, COL_WEEK], as_index=False)
+                 .agg(TotalHours=(COL_HOURS,"sum"))
+                 .rename(columns={COL_EMAIL:"Employee", COL_WEEK:"Week"}))
+
+df_str["NominalCap"] = np.where(df_str["Week"] < pd.Timestamp("2025-01-01"),
+                                HOURS_PRE25, HOURS_2025_ON)
+
+# ────────────────────────── 3. MILESTONE PREP ───────────────────────────
+fc_cols = [c for c in df_mile.columns if c.lower().endswith("_forecasted_date")]
+df_mile[fc_cols] = df_mile[fc_cols].apply(pd.to_datetime, errors="coerce")
+
+def first_open_milestone(row):
+    best_code, best_dt = None, pd.NaT
+    for fc in fc_cols:
+        code = fc[:-len("_Forecasted_Date")]
+        comp = f"{code}_Completed"
+        if comp not in row: continue
+        if str(row[comp]).strip().lower() != "no": continue
+        date_val = row[fc]
+        if pd.isna(date_val): continue
+        if pd.isna(best_dt) or date_val < best_dt:
+            best_code, best_dt = code, date_val
+    return pd.Series({"Milestone": best_code, "Forecast": best_dt})
+
+mile_info = df_mile.apply(first_open_milestone, axis=1)\
+                   .join(df_mile[[COL_MILE_PROJ]])
+
+# ────────────────────────── 4. WILL-FREE EMPLOYEES ──────────────────────
+closing_projects = mile_info.loc[mile_info["Forecast"].notna() &
+                                 (mile_info["Forecast"] <
+                                  RUN_DATE + timedelta(weeks=HORIZON_WEEKS)),
+                                 COL_MILE_PROJ]
+closing_emps = df_core.loc[df_core[COL_CORE_PROJ]
+                           .isin(closing_projects), "AssignedTo"]
+df_str["WillFree"] = df_str["Employee"].isin(closing_emps).astype("float32")
+
+# ────────────────────────── 5. FEATURE MATRIX + MODEL ───────────────────
+df_feat = feature_engineer(df_str.copy())
+emp2id  = {e:i for i,e in enumerate(df_feat["Employee"].unique())}
+df_feat["EmpID"] = df_feat["Employee"].map(emp2id).astype("float32")
+
+FEAT_COLS = ["ISO_Year","WeekOfYear","EmpID","NominalCap","WillFree"] + \
+            [c for c in df_feat.columns if c.startswith(("lag","roll"))]
+
+X_train = clean_numeric(df_feat, FEAT_COLS).to_numpy()
+y_train = df_feat["TotalHours"].astype("float32").values
+
+if USE_XGB:
+    model = XGBRegressor(
+        n_estimators=500, learning_rate=0.05, max_depth=6,
+        subsample=0.8, colsample_bytree=0.8, objective="reg:squarederror",
+        n_jobs=-1, random_state=42)
+else:
+    from sklearn.ensemble import RandomForestRegressor
+    model = RandomForestRegressor(n_estimators=400, n_jobs=-1, random_state=42)
+
+mae=[]
+for tr,val in TimeSeriesSplit(5).split(X_train):
+    model.fit(X_train[tr], y_train[tr])
+    mae.append(mean_absolute_error(y_train[val], model.predict(X_train[val])))
+logging.info("Time-series CV MAE = %.2f h", np.mean(mae))
+model.fit(X_train, y_train)
+
+# ────────────────────────── 6. FORECAST BLOCKS ──────────────────────────
+blocks=[]; latest = df_feat.sort_values(["Employee","Week"])\
+                           .groupby("Employee").tail(1)
+
+for k in range(HORIZON_WEEKS):
+    base = latest.copy() if k==0 else blocks[-1].copy()
+    base["Week"] += Week(1)
+    for l in LAGS:
+        base[f"lag{l}"] = base["TotalHours"] if l==1 else base[f"lag{l-1}"]
+    base = feature_engineer(base)
+    base["EmpID"] = base["Employee"].map(emp2id)
+
+    X_pred = clean_numeric(base, FEAT_COLS).to_numpy()
+    base["TotalHours"] = model.predict(X_pred).astype("float32")
+    base["WeekIdx"] = k+1
+    blocks.append(base)
+
+fc = pd.concat(blocks, ignore_index=True)
+
+# ────────────────────────── 7. GAP & ASSIGNMENT ─────────────────────────
+summary = []; assign_rows = []
+for wk in range(1, HORIZON_WEEKS+1):
+    wkdf = fc[fc["WeekIdx"]==wk].copy()
+    cap  = wkdf["NominalCap"].sum(); dem = wkdf["TotalHours"].sum()
+    gap  = max(0, UTIL_TARGET*cap - dem)
+    need = int(math.ceil(gap / MED_WK_H))
+    summary.append((wk,cap,dem,gap,need))
+
+    start = RUN_DATE + timedelta(weeks=wk-1)
+    end   = RUN_DATE + timedelta(weeks=wk)
+    ms_candidates = mile_info.loc[
+        (mile_info["Forecast"]>=start) &
+        (mile_info["Forecast"]< end)   &
+        mile_info["Milestone"].notna()
+    ].sort_values("Forecast")
+
+    wkdf["Spare"] = wkdf["NominalCap"] - wkdf["TotalHours"]
+    wkdf.sort_values("Spare", ascending=False, inplace=True)
+    cursor=0
+
+    # allocate milestone-driven projects first
+    for _, msrow in ms_candidates.head(need).iterrows():
+        if wkdf["Spare"].max() <= 0: break
+        idx = wkdf.index[cursor]
+        emp = wkdf.at[idx, "Employee"]
+        spare_before = wkdf.at[idx, "Spare"]
+        spare_after  = spare_before - MED_WK_H
+        assign_rows.append({
+            "WeekIdx": wk, "Reason": "Milestone",
+            "Milestone": msrow["Milestone"],
+            "Forecast_Date": msrow["Forecast"].date(),
+            "Employee": emp, "Spare_Before": spare_before,
+            "Spare_After":  spare_after
+        })
+        wkdf.at[idx,"Spare"] = spare_after
+        wkdf.sort_values("Spare", ascending=False, inplace=True)
+        cursor = (cursor+1) % len(wkdf)
+
+    # allocate remaining generic projects
+    remaining = need - len([r for r in assign_rows if r["WeekIdx"]==wk])
+    for _ in range(remaining):
+        if wkdf["Spare"].max() <= 0: break
+        idx = wkdf.index[cursor]
+        emp = wkdf.at[idx,"Employee"]
+        spare_before = wkdf.at[idx,"Spare"]
+        spare_after  = spare_before - MED_WK_H
+        assign_rows.append({
+            "WeekIdx": wk, "Reason": "Generic",
+            "Milestone": None, "Forecast_Date": None,
+            "Employee": emp, "Spare_Before": spare_before,
+            "Spare_After":  spare_after
+        })
+        wkdf.at[idx,"Spare"] = spare_after
+        wkdf.sort_values("Spare", ascending=False, inplace=True)
+        cursor = (cursor+1) % len(wkdf)
+
+spare_after_alloc = (pd.concat(blocks, ignore_index=True)
+                       .groupby("Employee")["NominalCap","TotalHours"]
+                       .sum()
+                       .assign(Spare=lambda d: d["NominalCap"] - d["TotalHours"])
+                       .sort_values("Spare", ascending=False)
+                       .reset_index())
+
+assign_df = pd.DataFrame(assign_rows)
+
+# ────────────────────────── 8. NEAREST MILESTONE TABLE ──────────────────
+nearest = mile_info.loc[mile_info["Forecast"].notna()]\
+                   .query("Forecast >= @RUN_DATE")\
+                   .sort_values("Forecast")\
+                   .head(MAX_MILESTONE_ROWS)
+
+# ────────────────────────── 9. WRITE AUDIT WORKBOOK ─────────────────────
+with pd.ExcelWriter(OUT_PATH, engine="xlsxwriter") as xl:
+    wb = xl.book
+    hdr_fmt   = add_format(wb, bold=True, bg_color="#CCCCCC",
+                           border=1, align="center")
+    num_fmt   = add_format(wb, num_format="#,##0", border=1)
+    gap_fmt   = add_format(wb, num_format="#,##0", border=1,
+                           bg_color="#FFEB9C")   # light amber
+    ok_fmt    = add_format(wb, num_format="#,##0", border=1)
+    percent   = add_format(wb, num_format="0%")
+
+    # --- Summary --------------------------------------------------------
+    sum_df = pd.DataFrame(summary, columns=["Week","Capacity","Demand",
+                                            "Gap","Projects_Needed"])
+    sum_df.to_excel(xl, "Summary", index=False, sheet_name="Summary")
+    ws = xl.sheets["Summary"]
+    for col, width in zip("ABCDE", [6,10,10,10,15]):
+        ws.set_column(f"{col}:{col}", width)
+    ws.freeze_panes(1,0)
+    ws.set_row(0, None, hdr_fmt)
+    for r in range(1, len(sum_df)+1):
+        ws.write_row(r, 0, sum_df.iloc[r-1], num_fmt)
+        ws.write(r, 3, sum_df.iloc[r-1]["Gap"],
+                 gap_fmt if sum_df.iloc[r-1]["Gap"]>0 else ok_fmt)
+
+    # --- Weekly forecast -----------------------------------------------
+    fc.to_excel(xl, "Weekly_Forecast", index=False)
+    xl.sheets["Weekly_Forecast"].freeze_panes(1,0)
+
+    # --- Assignments ----------------------------------------------------
+    assign_df.to_excel(xl, "Assignments", index=False)
+    xl.sheets["Assignments"].freeze_panes(1,0)
+
+    # --- Spare capacity -------------------------------------------------
+    spare_after_alloc.to_excel(xl, "Spare_Capacity", index=False)
+    xl.sheets["Spare_Capacity"].freeze_panes(1,0)
+
+    # --- Milestone watch -----------------------------------------------
+    nearest_out = nearest.assign(Forecast=nearest["Forecast"]
+                                 .dt.strftime("%Y-%m-%d"))
+    nearest_out.to_excel(xl, "Milestone_Watch", index=False)
+    xl.sheets["Milestone_Watch"].freeze_panes(1,0)
+
+    # --- Model info -----------------------------------------------------
+    info = {
+        "Run_Date":        [RUN_DATE.date()],
+        "Horizon_Weeks":   [HORIZON_WEEKS],
+        "Util_Target":     [UTIL_TARGET],
+        "Train_Rows":      [len(df_feat)],
+        "CV_MAE":          [round(np.mean(mae),2)],
+        "Median_Proj_Week":[MED_WK_H],
+        "Model":           ["XGBoost" if USE_XGB else "RandomForest"]
+    }
+    pd.DataFrame(info).to_excel(xl, "Model_Info", index=False)
+    xl.sheets["Model_Info"].freeze_panes(1,0)
+
+    # --- Raw data slice -------------------------------------------------
+    df_feat.tail(500).to_excel(xl, "Raw_Data", index=False)
+    xl.sheets["Raw_Data"].freeze_panes(1,0)
+
+logging.info("Audit workbook written to %s", OUT_PATH)
+
+# ────────────────────────── 10. CONSOLE REPORT --------------------------
+print("\n" + "="*88)
+print("Weekly Capacity  (util target {:0.0%})".format(UTIL_TARGET))
+print("="*88)
+for w,c,d,g,n in summary:
+    reason = "OK" if n==0 else f"{n} new project(s)"
+    print(f"Week {w:<2d}  Cap {c:6,.0f}   Dem {d:6,.0f}   "
+          f"Gap {g:5,.0f}   {reason}")
+print("="*88)
+print("Assignments written to 'Assignments' sheet; "
+      "audit workbook saved →", OUT_PATH)
+print("="*88)
