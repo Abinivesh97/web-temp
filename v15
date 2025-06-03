@@ -1,0 +1,122 @@
+##############################################################################
+# capacity_audit_full.py
+#
+# HOW TO USE
+#   1.  Edit the four *_PATH constants below (STR / CoreAlm / Milestone /
+#       Employee whitelist).
+#   2.  pip install pandas numpy scikit-learn openpyxl xlsxwriter xgboost
+#   3.  python capacity_audit_full.py
+#
+#   The script writes capacity_audit.xlsx in the same folder.
+##############################################################################
+
+import re, sys, logging, math
+from pathlib import Path
+from datetime import timedelta
+import numpy as np
+import pandas as pd
+from pandas.tseries.offsets import Week
+from sklearn.model_selection import TimeSeriesSplit
+from sklearn.metrics import mean_absolute_error
+
+# ─── FILE LOCATIONS (EDIT THESE) ─────────────────────────────────────────
+STR_PATH   = Path(r"C:\data\STR_cleaned.xlsx")
+CORE_PATH  = Path(r"C:\data\CoreAlm_master.xlsx")
+MILE_PATH  = Path(r"C:\data\Milestone_tracker.xlsx")
+EMP_PATH   = Path(r"C:\data\Employee_Whitelist.xlsx")
+OUT_PATH   = Path(r"capacity_audit.xlsx")
+
+# ─── CONFIG CONSTANTS ───────────────────────────────────────────────────
+RUN_DATE       = pd.Timestamp.today().normalize()   # anchor Monday
+HORIZON_WEEKS  = 4
+UTIL_TARGET    = 0.94
+HOURS_PRE25    = 43
+HOURS_2025_ON  = 40
+MAX_MILESTONE_ROWS = 30
+
+# column aliases (change only if headers differ)
+COL_EMAIL      = "Resource_Email"
+COL_HOURS      = "Total_Hours_By_week"
+COL_WEEK       = "Week"
+COL_STR_PROJ   = "BG_Project_Code"
+COL_CORE_PROJ  = "Project STR Code"
+COL_MILE_PROJ  = "Project_Code"
+
+logging.basicConfig(level=logging.INFO,
+                    format="%(asctime)s | %(levelname)-8s | %(message)s",
+                    datefmt="%H:%M:%S")
+
+try:                          # try XGBoost first
+    from xgboost import XGBRegressor
+    USE_XGB = True
+except ImportError:           # fall back to Random-Forest
+    from sklearn.ensemble import RandomForestRegressor
+    USE_XGB = False
+
+# regex that matches *any* ISO-week string “2018W25”, “2018-W25”, …
+ISO_RE = re.compile(r"(?P<yr>\d{4})\s*[-_/]?\s*W?\s*(?P<wk>\d{2})",
+                    re.I)
+
+# ─── LITTLE HELPERS ─────────────────────────────────────────────────────
+def assure(path):
+    if not path.exists():
+        logging.error("File not found: %s", path); sys.exit(1)
+
+def load_xlsx(path):
+    assure(path); return pd.read_excel(path)
+
+def parse_week(val):
+    """Return normalized Monday Timestamp or NaT."""
+    if pd.isna(val):                  # empty cell
+        return pd.NaT
+    ts = pd.to_datetime(val, errors="coerce")
+    if not pd.isna(ts):               # already a valid date
+        return ts.normalize()
+    m = ISO_RE.search(str(val).strip())
+    if m:                             # ISO-week variant
+        y, w = m.group("yr","wk")
+        return pd.to_datetime(f"{y}-W{w}-1", format="%G-W%V-%u",
+                              errors="coerce")
+    return pd.NaT                     # still unparseable
+
+def clean_numeric(df, cols):
+    """float32, NaN/∞ coerced to 0 so sklearn never explodes."""
+    return (df[cols]
+              .apply(pd.to_numeric, errors="coerce")
+              .replace([np.inf, -np.inf], np.nan)
+              .fillna(0.0)
+              .astype("float32"))
+
+def add_format(wb, **kwargs):
+    return wb.add_format(kwargs)
+
+# ─── 1. LOAD WORKBOOKS ──────────────────────────────────────────────────
+logging.info("Loading workbooks …")
+df_str  = load_xlsx(STR_PATH)
+df_core = load_xlsx(CORE_PATH)
+df_mile = load_xlsx(MILE_PATH)
+df_emp  = load_xlsx(EMP_PATH)
+
+# normalise e-mails (strip + lower-case) so whitelist can match any variant
+df_str[COL_EMAIL] = df_str[COL_EMAIL].str.strip().str.lower()
+df_emp.iloc[:,0]  = df_emp.iloc[:,0].str.strip().str.lower()
+EMP_SET = set(df_emp.iloc[:,0])
+
+# ─── 2. PARSE & FILTER STR ──────────────────────────────────────────────
+df_str[COL_WEEK] = df_str[COL_WEEK].apply(parse_week)
+df_str = df_str[df_str[COL_WEEK].notna()]            # drop unparsed weeks
+df_str = df_str[df_str[COL_EMAIL].isin(EMP_SET)]     # whitelist filter
+
+# DEBUG: show surviving counts
+logging.info("Rows after whitelist : %d  |  distinct employees : %d  |  distinct weeks : %d",
+             len(df_str), df_str[COL_EMAIL].nunique(),
+             df_str[COL_WEEK].dt.to_period('W').nunique())
+
+# dynamic lag / roll window choice
+n_weeks = df_str[COL_WEEK].dt.to_period('W').nunique()
+if n_weeks >= 8:
+    LAGS, ROLLS = (1,2,3,4), (4,8,12)
+elif n_weeks >= 5:
+    LAGS, ROLLS = (1,2), (3,6)
+else:
+    LAGS, ROLLS = (1,), (2,)
