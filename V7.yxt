@@ -1,0 +1,180 @@
+##############################################################################
+# employee_capacity.py  –  FINAL VERSION  (no CLI, just edit the 3 paths)
+##############################################################################
+from __future__ import annotations
+import logging, re, sys
+from pathlib import Path
+from datetime import datetime, timedelta
+
+import numpy as np
+import pandas as pd
+from sklearn.model_selection import TimeSeriesSplit
+from sklearn.metrics import mean_absolute_error
+
+try:
+    from xgboost import XGBRegressor
+    MODEL_ALGO = "xgb"
+except ImportError:
+    from sklearn.ensemble import RandomForestRegressor
+    MODEL_ALGO = "rf"
+
+# ─── 0. HARD-CODED FILE PATHS ───────────────────────────────────────────────
+STR_PATH   = Path(r"C:\data\STR_cleaned.xlsx")           # ← change to yours
+CORE_PATH  = Path(r"C:\data\CoreAlm_master.xlsx")        # ← change
+MILE_PATH  = Path(r"C:\data\Milestone_tracker.xlsx")     # ← change
+
+RUN_DATE    = pd.Timestamp("2025-06-03")     # anchor date
+HORIZON_D   = 30                             # days ahead (≈ 4 weeks)
+
+UTIL_TARGET = 0.94
+HRS_PRE2025 = 43
+HRS_2025ON  = 40
+
+# ─── 1. COLUMN ALIASES (match your sheets) ─────────────────────────────────
+# STR workbook
+STR_EMAIL_COL    = "Resource_Email"
+STR_HOURS_COL    = "Total_Hours_By_week"
+STR_WEEK_COL     = "Week"
+STR_PROJECT_COL  = "BG_Project_Code"
+
+# CoreAlm workbook
+CORE_PROJECT_COL = "Project STR Code"        # exact header in CoreAlm
+
+# Milestone workbook
+MILE_PROJECT_COL = "Project_Code"
+
+# ─── 2. CONSTANTS FOR FEATURES ────────────────────────────────────────────
+LAG_W   = (1, 2, 3, 4)
+ROLL_W  = (4, 8, 12)
+ISO_RE  = re.compile(r"^(\d{4})[-_]?W?(\d{2})$", re.I)
+
+logging.basicConfig(level=logging.INFO, format="%(levelname)s: %(message)s")
+
+# ─── 3. HELPERS ───────────────────────────────────────────────────────────
+def parse_week(v):
+    if pd.isna(v): return pd.NaT
+    d = pd.to_datetime(v, errors="coerce")
+    if not pd.isna(d): return d.normalize()
+    m = ISO_RE.match(str(v).strip())
+    if m:
+        y,w = m.groups()
+        return pd.to_datetime(f"{y}-W{w}-1", format="%G-W%V-%u", errors="coerce")
+    return pd.NaT
+
+def iso_parts(df, col="Week"):
+    iso = df[col].dt.isocalendar()
+    if isinstance(iso, pd.DataFrame):
+        df["ISO_Year"]   = iso["year"].astype("float32")
+        df["WeekOfYear"] = iso["week"].astype("float32")
+    else:                                   # pandas <1.1 fallback
+        df["ISO_Year"]   = [t[0] for t in iso]
+        df["WeekOfYear"] = [t[1] for t in iso]
+    return df
+
+def add_lags_rolls(f):
+    for l in LAG_W:
+        f[f"lag{l}"] = f.groupby("Employee")["TotalHours"].shift(l)
+    for r in ROLL_W:
+        f[f"roll{r}"] = (f.groupby("Employee")["TotalHours"]
+                           .shift(1).rolling(r, min_periods=1).mean())
+    return f
+
+def load_xlsx(p: Path) -> pd.DataFrame:
+    if not p.exists():
+        logging.error("File not found: %s", p); sys.exit(1)
+    return pd.read_excel(p)
+
+# ─── 4. LOAD THREE WORKBOOKS ─────────────────────────────────────────────
+df_str  = load_xlsx(STR_PATH)
+df_core = load_xlsx(CORE_PATH)
+df_mile = load_xlsx(MILE_PATH)
+
+# ─── 5. PRE-CLEAN STR ───────────────────────────────────────────────────
+df_str[STR_WEEK_COL] = df_str[STR_WEEK_COL].apply(parse_week)
+df_str = df_str[df_str[STR_WEEK_COL].notna()].copy()
+
+# median project weekly load (before dropping project code)
+proj_week = (df_str.groupby([STR_PROJECT_COL, STR_WEEK_COL], as_index=False)
+                     [STR_HOURS_COL].sum()
+                     .rename(columns={STR_HOURS_COL:"Hours"}))
+MED_PROJ_WK_H = proj_week.groupby(STR_PROJECT_COL)["Hours"].mean().median()
+logging.info("Median project weekly hours = %.1f", MED_PROJ_WK_H)
+
+# aggregate → Employee × Monday week
+df_str = (df_str.groupby([STR_EMAIL_COL, STR_WEEK_COL], as_index=False)
+                 .agg(TotalHours=(STR_HOURS_COL,"sum"))
+                 .rename(columns={STR_EMAIL_COL:"Employee",
+                                  STR_WEEK_COL:"Week"}))
+
+# nominal capacity switch
+cap_cut = pd.Timestamp("2025-01-01")
+df_str["NominalCap"] = np.where(df_str["Week"] < cap_cut, HRS_PRE2025, HRS_2025ON)
+
+# ─── 6. FLAG EMPLOYEES WHO WILL BE FREED (Milestone roll-off) ───────────
+mil_close_cols = [c for c in df_mile.columns if c.lower().endswith("_completed")]
+cutoff_dt      = RUN_DATE + timedelta(days=HORIZON_D)
+closing_proj   = (df_mile.loc[df_mile[mil_close_cols].lt(cutoff_dt).any(axis=1),
+                              MILE_PROJECT_COL].unique())
+closing_emp    = (df_core[df_core[CORE_PROJECT_COL].isin(closing_proj)]
+                          ["AssignedTo"].unique())
+df_str["WillFree"] = df_str["Employee"].isin(closing_emp).astype("float32")
+
+# ─── 7. FEATURE BUILD & MODEL TRAIN ─────────────────────────────────────
+df_feat = iso_parts(add_lags_rolls(df_str.copy()))
+emp2id  = {e:i for i,e in enumerate(df_feat["Employee"].unique())}
+df_feat["EmpID"] = df_feat["Employee"].map(emp2id).astype("float32")
+
+feat_cols = ["ISO_Year","WeekOfYear","EmpID","NominalCap","WillFree"] + \
+            [c for c in df_feat.columns if c.startswith(("lag","roll"))]
+df_feat = df_feat.dropna(subset=feat_cols+["TotalHours"])
+df_feat[feat_cols] = df_feat[feat_cols].astype("float32")
+
+X, y = df_feat[feat_cols], df_feat["TotalHours"].astype("float32")
+
+if MODEL_ALGO == "xgb":
+    model = XGBRegressor(n_estimators=400,learning_rate=0.05,max_depth=6,
+                         subsample=0.8,colsample_bytree=0.8,
+                         objective="reg:squarederror",n_jobs=-1,random_state=42)
+else:
+    from sklearn.ensemble import RandomForestRegressor
+    model = RandomForestRegressor(n_estimators=400,n_jobs=-1,random_state=42)
+
+mae = [mean_absolute_error(y.iloc[val],
+                           model.fit(X.iloc[tr], y.iloc[tr]).predict(X.iloc[val]))
+       for tr,val in TimeSeriesSplit(5).split(X)]
+logging.info("CV MAE ≈ %.2f h", np.mean(mae))
+model.fit(X, y)
+
+# ─── 8. FOUR-WEEK FORECAST ──────────────────────────────────────────────
+blocks=[]
+latest = df_feat.sort_values(["Employee","Week"]).groupby("Employee").tail(1)
+
+for w in range(4):
+    base = latest.copy() if w==0 else blocks[-1].copy()
+    base["Week"] = (base["Week"] + pd.Timedelta(days=7)).normalize()
+    for l in LAG_W: base[f"lag{l}"] = base["TotalHours"] if l==1 else base[f"lag{l-1}"]
+    base = iso_parts(base)
+    base["EmpID"] = base["Employee"].map(emp2id).fillna(-1).astype("float32")
+    base[feat_cols] = base[feat_cols].astype("float32")
+    base["TotalHours"] = model.predict(base[feat_cols]).astype("float32")
+    base["WeekIdx"] = w+1
+    blocks.append(base)
+
+fc = pd.concat(blocks, ignore_index=True)
+
+# ─── 9. GAP & PROJECTS NEEDED ───────────────────────────────────────────
+print(f"\nHORIZON : {RUN_DATE.date()} → {(RUN_DATE+timedelta(days=HORIZON_D)).date()}")
+print("Wk |   Capacity |   Demand |    Gap | NewProj")
+print("----------------------------------------------")
+
+total_proj=0
+for wk in range(1,5):
+    wk_df   = fc[fc["WeekIdx"]==wk]
+    cap     = wk_df["NominalCap"].sum()
+    demand  = wk_df["TotalHours"].sum()
+    gap     = max(0, UTIL_TARGET*cap - demand)
+    projects= int(np.ceil(gap / MED_PROJ_WK_H))
+    total_proj += projects
+    print(f"{wk:>2d} | {cap:10,.0f} | {demand:8,.0f} | {gap:7,.0f} | {projects:7d}")
+
+print(f"\nTOTAL new projects next 4 weeks : {total_proj}")
