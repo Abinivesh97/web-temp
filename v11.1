@@ -1,0 +1,44 @@
+# ─── 11. COMPACT WEEKLY REPORT  -----------------------------------------------
+print("\n" + "="*78)
+print(f"FORECAST WINDOW : {RUN_DATE.date()} → "
+      f"{(RUN_DATE + timedelta(weeks=HORIZON_WEEKS)).date()}   "
+      f"(util target {UTIL_TARGET:.0%})")
+print(f"Employees on whitelist : {len(EMP_SET)}   "
+      f"Median proj-week hrs : {MED_WK_H:.1f}")
+print("="*78)
+
+hdr = "Wk | Cap | Dem | Gap | Need |  Reason"
+print(hdr); print("-"*len(hdr))
+
+for (wk, cap, dem, gap, need), alloc in zip(summary, assignments):
+    # how many milestones in the window that still need effort
+    week_end   = RUN_DATE + timedelta(weeks=wk)
+    week_start = week_end - timedelta(weeks=1)
+    ms_count   = mile_info.loc[
+        (mile_info["Forecast"] >= week_start) &
+        (mile_info["Forecast"] <  week_end)  &
+        (mile_info["Forecast"].notna())      &
+        (mile_info["Milestone"].notna())
+    ].shape[0]
+
+    if need == 0:
+        reason = "Target already ≥ 94 %"
+    else:
+        reason = (f"{ms_count} milestone(s) closing + "
+                  f"util gap → {need} new project(s)")
+
+    print(f"{wk:>2d} | {cap:5,.0f} | {dem:5,.0f} | "
+          f"{gap:5,.0f} | {need:4d} | {reason}")
+
+print("-"*len(hdr))
+print(f"TOTAL new projects over {HORIZON_WEEKS} weeks : "
+      f"{sum(x[-1] for x in summary)}")
+
+print("\nNearest open milestones (max shown =", MAX_MILESTONE_ROWS, ")")
+if nearest.empty:
+    print("  – none within horizon –")
+else:
+    out = nearest.assign(Forecast=nearest["Forecast"]
+                         .dt.strftime("%Y-%m-%d"))
+    print(out.to_string(index=False))
+print("="*78)
