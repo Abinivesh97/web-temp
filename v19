@@ -1,0 +1,199 @@
+import pandas as pd
+import numpy as np
+import re
+from pathlib import Path
+from datetime import timedelta
+from sklearn.ensemble import RandomForestRegressor
+from sklearn.model_selection import TimeSeriesSplit
+from sklearn.metrics import mean_absolute_error
+from pandas.tseries.offsets import Week
+
+def parse_week(val):
+    m = re.match(r"^(?P<yr>\d{4})[-_]?W(?P<wk>\d{1,2})$", str(val).strip(), re.I)
+    if not m:
+        return pd.NaT
+    yr, wk = m.group("yr"), m.group("wk").zfill(2)
+    return pd.to_datetime(f"{yr}-W{wk}-1", format="%G-W%V-%u", errors="coerce").normalize()
+
+def add_lags_rolls(df, lags, rolls):
+    f = df.copy()
+    for i in lags:
+        f[f"lag{i}"] = f.groupby("EmployeeEmail")["Total_Hours_By_Week"].shift(i)
+    for r in rolls:
+        f[f"roll{r}"] = f.groupby("EmployeeEmail")["Total_Hours_By_Week"].shift(1).rolling(r, min_periods=1).mean()
+    return f
+
+def assign_milestones_and_projects(df_future, df_mile, MED_WK_H, RUN_DATE, HOURS_PRE2025, HOURS_2025ON, HORIZON_WEEKS):
+    assignments = []
+    n_emp = df_future["EmployeeEmail"].nunique()
+    for wk in range(1, HORIZON_WEEKS + 1):
+        wkdf = df_future[df_future["WeekIdx"] == wk].copy()
+        run_dt = RUN_DATE + timedelta(days=(wk - 1) * 7)
+        cap_each_wk = HOURS_PRE2025 if run_dt < pd.Timestamp("2025-01-01") else HOURS_2025ON
+        wkdf["Spare"] = cap_each_wk - wkdf["Total_Hours_By_Week"]
+        wkdf.sort_values("Spare", ascending=False, inplace=True)
+        wkdf.reset_index(drop=True, inplace=True)
+        cur = 0
+        def drop(emp_row, ms_code, ms_date, reason):
+            nonlocal cur
+            emp = emp_row["EmployeeEmail"]
+            spare_now = emp_row["Spare"]
+            assignments.append({
+                "Week": wk,
+                "Reason": reason,
+                "MilestoneCode": ms_code,
+                "ForecastDate": ms_date,
+                "Employee": emp,
+                "Spare_Before": spare_now,
+                "Spare_After": spare_now - MED_WK_H
+            })
+            emp_row["Spare"] = spare_now - MED_WK_H
+            cur = (cur + 1) % len(wkdf)
+            return emp_row
+        ms_cand = df_mile[(df_mile["_completed"].isna()) & (df_mile["_Forecasted_Date"] >= run_dt) & (df_mile["_Forecasted_Date"] < run_dt + timedelta(days=7))]
+        for _, m in ms_cand.iterrows():
+            emp = m["AssignedTo"]
+            idx = wkdf.index[wkdf["EmployeeEmail"] == emp]
+            if len(idx) == 0:
+                continue
+            idx = idx[0]
+            row = wkdf.loc[idx].copy()
+            if row["Spare"] >= MED_WK_H:
+                wkdf.loc[idx] = drop(row, m["MILE_Project_Code"], m["_Forecasted_Date"], "milestone")
+                wkdf.sort_values("Spare", ascending=False, inplace=True)
+                wkdf.reset_index(drop=True, inplace=True)
+        cap_each = cap_each_wk
+        dem = wkdf["Total_Hours_By_Week"].sum()
+        gap = max(0, 0.94 * cap_each * n_emp - dem)
+        new_needed = int(gap // MED_WK_H)
+        emp_load = wkdf[["EmployeeEmail", "Spare"]].copy()
+        emp_load["Capacity"] = cap_each
+        emp_load.sort_values("Spare", ascending=False, inplace=True)
+        emp_load.reset_index(drop=True, inplace=True)
+        cnt = 0
+        for _, row in emp_load.iterrows():
+            if cnt >= new_needed:
+                break
+            if row["Spare"] >= MED_WK_H:
+                assignments.append({
+                    "Week": wk,
+                    "Reason": "new_project",
+                    "MilestoneCode": None,
+                    "ForecastDate": None,
+                    "Employee": row["EmployeeEmail"],
+                    "Spare_Before": row["Spare"],
+                    "Spare_After": row["Spare"] - MED_WK_H
+                })
+                cnt += 1
+    return pd.DataFrame(assignments)
+
+def main():
+    UTILISATION_TARGET = 0.94
+    N_WEEKS_IN_MONTH = 4
+    HORIZON_WEEKS = 4
+    HOURS_PRE2025 = 43
+    HOURS_2025ON = 40
+    MED_WK_H = 35.0
+    RUN_DATE = pd.Timestamp(pd.to_datetime("today").date())
+
+    STR_PATH = Path(r"C:\data\STR_cleaned.xlsx")
+    CORE_PATH = Path(r"C:\data\CoreAlm_master.xlsx")
+    MILE_PATH = Path(r"C:\data\Milestone_tracker.xlsx")
+    EMP_PATH = Path(r"C:\data\Employee_Whitelist.xlsx")
+
+    df_str = pd.read_excel(STR_PATH, sheet_name="STR")
+    df_core = pd.read_excel(CORE_PATH, sheet_name="Master")
+    df_mile = pd.read_excel(MILE_PATH, sheet_name="Milestones")
+    df_emp = pd.read_excel(EMP_PATH, sheet_name="Whitelist")
+
+    df_str["WeekDate"] = df_str["WeekStr"].apply(parse_week)
+    df_str["EmployeeEmail"] = df_str["EmployeeEmail"].str.strip().str.lower()
+    emp_set = set(df_emp.iloc[:, 0].str.strip().str.lower())
+    df_str = df_str[df_str["EmployeeEmail"].isin(emp_set)]
+    df_str.sort_values(["EmployeeEmail", "WeekDate"], inplace=True)
+    df_str.reset_index(drop=True, inplace=True)
+
+    df_str = df_str[df_str["WeekDate"].notna()]
+    n_weeks = df_str["WeekDate"].dt.to_period("W").nunique()
+    if n_weeks >= 8:
+        LAGS, ROLLS = (1, 2, 3, 4), (4, 8, 12)
+    elif n_weeks >= 5:
+        LAGS, ROLLS = (1, 2), (3, 6)
+    else:
+        LAGS, ROLLS = (1,), (2,)
+
+    df_feat = add_lags_rolls(df_str, LAGS, ROLLS)
+    iso = df_feat["WeekDate"].dt.isocalendar()
+    df_feat["ISO_Year"] = iso.year.astype("int16")
+    df_feat["WeekOfYear"] = iso.week.astype("int16")
+    emp2id = {e: i for i, e in enumerate(df_feat["EmployeeEmail"].unique())}
+    df_feat["EmpID"] = df_feat["EmployeeEmail"].map(emp2id).astype("int32")
+    feat_cols = ["ISO_Year", "WeekOfYear", "EmpID"] + [c for c in df_feat.columns if c.startswith(("lag", "roll"))]
+    df_feat = df_feat.dropna(subset=feat_cols + ["Total_Hours_By_Week"])
+    for c in feat_cols:
+        df_feat[c] = df_feat[c].astype("float32")
+    X = df_feat[feat_cols]
+    y = df_feat["Total_Hours_By_Week"].astype("float32")
+
+    model = RandomForestRegressor(n_estimators=400, n_jobs=-1, random_state=42)
+    tscv = TimeSeriesSplit(5)
+    for tr, val in tscv.split(X):
+        model.fit(X.iloc[tr], y.iloc[tr])
+        _ = mean_absolute_error(y.iloc[val], model.predict(X.iloc[val]))
+    model.fit(X, y)
+
+    last_feats = df_feat.sort_values(["EmployeeEmail", "WeekDate"]).groupby("EmployeeEmail").tail(1).copy()
+    blocks = []
+    for i in range(HORIZON_WEEKS):
+        base = last_feats.copy() if i == 0 else blocks[-1].copy()
+        base["WeekDate"] = base["WeekDate"] + timedelta(days=7)
+        for j in LAGS:
+            base[f"lag{j}"] = base["Total_Hours_By_Week"] if j == 1 else base[f"lag{j-1}"]
+        for r in ROLLS:
+            base[f"roll{r}"] = base[f"roll{r}"]
+        iso2 = base["WeekDate"].dt.isocalendar()
+        base["ISO_Year"] = iso2.year.astype("int16")
+        base["WeekOfYear"] = iso2.week.astype("int16")
+        base["EmpID"] = base["EmployeeEmail"].map(emp2id).astype("int32")
+        for c in feat_cols:
+            base[c] = base[c].astype("float32")
+        base["Total_Hours_By_Week"] = model.predict(base[feat_cols]).astype("float32")
+        base["WeekIdx"] = i + 1
+        blocks.append(base)
+
+    future_df = pd.concat(blocks, ignore_index=True)
+    future_df["PredHoursNextMonth"] = future_df["Total_Hours_By_Week"] * N_WEEKS_IN_MONTH
+
+    cap_each = HOURS_PRE2025 if RUN_DATE < pd.Timestamp("2025-01-01") else HOURS_2025ON
+    n_emp = future_df["EmployeeEmail"].nunique()
+    capacity_week = n_emp * cap_each
+    capacity_month = capacity_week * N_WEEKS_IN_MONTH
+    forecast_week_hours = future_df["Total_Hours_By_Week"].sum()
+    forecast_month_hours = future_df["PredHoursNextMonth"].sum()
+    gap_week = max(0, UTILISATION_TARGET * capacity_week - forecast_week_hours)
+    gap_month = max(0, UTILISATION_TARGET * capacity_month - forecast_month_hours)
+    proj_per_wk = int(gap_week // MED_WK_H)
+
+    assign_df = assign_milestones_and_projects(future_df, df_mile, MED_WK_H, RUN_DATE, HOURS_PRE2025, HOURS_2025ON, HORIZON_WEEKS)
+
+    summary_rows = []
+    for w in range(1, HORIZON_WEEKS + 1):
+        run_dt = RUN_DATE + timedelta(days=(w - 1) * 7)
+        cap_w = n_emp * (HOURS_PRE2025 if run_dt < pd.Timestamp("2025-01-01") else HOURS_2025ON)
+        dem = future_df[future_df["WeekIdx"] == w]["Total_Hours_By_Week"].sum()
+        gap = max(0, UTILISATION_TARGET * cap_w - dem)
+        newp = int(gap // MED_WK_H)
+        summary_rows.append({"Week": w, "Capacity": cap_w, "Demand": dem, "Gap": gap, "NewProj": newp})
+    df_summary = pd.DataFrame(summary_rows)
+
+    df_upcoming = df_mile[df_mile["_completed"].isna()].sort_values("_Forecasted_Date").head(10)[["MILE_Project_Code", "_Forecasted_Date", "AssignedTo"]]
+    df_upcoming.columns = ["Milestone", "ForecastDate", "Employee"]
+
+    out_path = Path("capacity_audit.xlsx")
+    with pd.ExcelWriter(out_path, engine="xlsxwriter") as writer:
+        df_summary.to_excel(writer, sheet_name="Summary", index=False)
+        assign_df.to_excel(writer, sheet_name="Assignments", index=False)
+        df_upcoming.to_excel(writer, sheet_name="NearestMilestones", index=False)
+
+if __name__ == "__main__":
+    main()
