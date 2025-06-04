@@ -1,0 +1,42 @@
+import pandas as pd
+
+# Load sheets into DataFrames
+df1 = pd.read_excel('sheet1.xlsx')
+df2 = pd.read_excel('sheet2.xlsx')
+df3 = pd.read_excel('sheet3.xlsx')
+
+# Combine all sheets
+df = pd.concat([df1, df2, df3], ignore_index=True)
+
+# Define filtering conditions for non-billable
+non_billable_conditions = (
+    df['n'].str.startswith('OVH-') |
+    (df['n'] == 'Administrative Projects') |
+    (df['n'] == 'SLA-PRJ-CYBERLAB') |
+    (df['n'] == 'Cybersecurity Vulnerability Management activity') |
+    (df['O'] == 'Generic Time Recording_C25')
+)
+
+# Create the billable/non-billable column
+df['Billable_Status'] = ['Non-Billable' if condition else 'Billable' 
+                         for condition in non_billable_conditions]
+
+# Columns required based on image
+required_columns = [
+    'Resource_Email',
+    'BG_Project_Code',
+    'Week',
+    'Total_Hours_By_Week',
+    'Resource_Orgadoc',
+    'Year',
+    'Week_No',
+    'Billable_Status'
+]
+
+# Filter to required columns
+final_df = df[required_columns]
+
+# Save to new Excel file
+final_df.to_excel('filtered_billable_report.xlsx', index=False)
+
+print("Filtered data saved successfully to 'filtered_billable_report.xlsx'")
