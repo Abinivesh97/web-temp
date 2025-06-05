@@ -1,0 +1,22 @@
+# STEP 1: Combine df1, df2, df3
+df = pd.concat([df1, df2, df3], ignore_index=True)
+
+# STEP 2: Strip and create unique_key in main df
+df['unique_key'] = (
+    df['Project_Or_Other_Activity_Name'].astype(str).str.strip() +
+    df['Sub_Project_Or_Other_Sub_Activity_Name'].astype(str).str.strip()
+)
+
+# STEP 3: Clean existing Unique key column in condition_df (just in case)
+condition_df['Unique key'] = condition_df['Unique key'].astype(str).str.strip()
+
+# STEP 4: Merge to bring in Grouping
+df = df.merge(
+    condition_df[['Unique key', 'Grouping']],
+    how='left',
+    left_on='unique_key',
+    right_on='Unique key'
+)
+
+# STEP 5: Define and apply mapping
+df['Billable_Status'] = df['Grouping'].apply(lambda x: category_dict.get(x, 'Billable'))
