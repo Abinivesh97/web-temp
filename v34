@@ -1,0 +1,200 @@
+import re
+import sys
+import logging
+import math
+from pathlib import Path
+from datetime import timedelta
+
+import numpy as np
+import pandas as pd
+from pandas.tseries.offsets import Week
+from sklearn.metrics import mean_absolute_error
+from sklearn.model_selection import TimeSeriesSplit
+
+try:
+    from xgboost import XGBRegressor
+    MODEL = XGBRegressor
+except ImportError:
+    from sklearn.ensemble import GradientBoostingRegressor as MODEL
+
+STR_PATH = Path(r"C:\data\STR_cleaned.xlsx")
+MILE_PATH = Path(r"C:\data\Milestone_tracker.xlsx")
+EMP_PATH = Path(r"C:\data\Employee_Whitelist.xlsx")
+OUT_PATH = Path(r"capacity_audit_billable.xlsx")
+
+RUN_DATE = pd.Timestamp.today().normalize()
+HORIZON_WEEKS = 4
+UTIL_TARGET = 0.94
+HOURS_PRE25 = 43
+HOURS_2025_ON = 40
+
+LAGS = tuple(range(1, 13))
+ROLLS = (4, 8, 12)
+MAX_MILESTONE_ROWS = 30
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)-8s | %(message)s",
+    datefmt="%H:%M:%S"
+)
+
+ISO_RE = re.compile(r"^(?P<yr>\d{4})[-_./\s]*W?(?P<wk>\d{1,2})\b", re.IGNORECASE)
+
+def parse_week(v):
+    if pd.isna(v):
+        return pd.NaT
+    ts = pd.to_datetime(v, errors="coerce")
+    if not pd.isna(ts):
+        return ts.normalize()
+    s = str(v).strip()
+    m = ISO_RE.match(s)
+    if m:
+        iso = f"{m.group('yr')}-W{m.group('wk').zfill(2)}-1"
+        return pd.to_datetime(iso, format="%G-W%V-%u", errors="coerce")
+    return pd.NaT
+
+def clean_num(df, cols):
+    return (
+        df[cols]
+        .apply(pd.to_numeric, errors="coerce")
+        .replace([np.inf, -np.inf], np.nan)
+        .fillna(0.0)
+        .astype("float32")
+    )
+
+logging.info("Loading STR + Milestones + Whitelist …")
+df_str = pd.read_excel(STR_PATH)
+df_mile = pd.read_excel(MILE_PATH)
+df_emp = pd.read_excel(EMP_PATH)
+
+df_str["Resource_Email"] = df_str["Resource_Email"].astype(str).str.strip().str.lower()
+df_emp.iloc[:, 0] = df_emp.iloc[:, 0].astype(str).str.strip().str.lower()
+VALID = set(df_emp.iloc[:, 0])
+df_str = df_str[df_str["Resource_Email"].isin(VALID)]
+df_str["Is_Billable"] = (df_str["Billable_Status"].astype(str).str.strip() == "Billable").astype(int)
+df_str["Week"] = df_str["Week"].apply(parse_week)
+df_str = df_str[df_str["Week"].notna()]
+
+ag = (
+    df_str
+    .groupby(["Resource_Email", "Week", "Is_Billable"], as_index=False)
+    .agg(Hours=("Total_Hours_By_week", "sum"))
+    .rename(columns={"Resource_Email": "Employee"})
+)
+
+pivot = (
+    ag.pivot_table(index=["Employee", "Week"], columns="Is_Billable", values="Hours", fill_value=0.0)
+    .reset_index()
+    .rename(columns={1: "BillableHrs", 0: "NonBillableHrs"})
+)
+pivot["TotalHours_raw"] = pivot["BillableHrs"] + pivot["NonBillableHrs"]
+pivot["NominalCap"] = np.where(pivot["Week"] < pd.Timestamp("2025-01-01"), HOURS_PRE25, HOURS_2025_ON)
+pivot["TotalHours"] = np.minimum(pivot["TotalHours_raw"], pivot["NominalCap"])
+pivot["BillableRatio"] = (pivot["BillableHrs"] / pivot["TotalHours_raw"]).fillna(0.0).clip(0, 1)
+
+feat = pivot.copy()
+for l in LAGS:
+    feat[f"lag{l}"] = feat.groupby("Employee")["TotalHours_raw"].shift(l)
+    feat[f"lagBillRatio{l}"] = feat.groupby("Employee")["BillableRatio"].shift(l)
+
+for r in ROLLS:
+    lcols = [f"lag{i}" for i in range(1, r + 1)]
+    feat[f"roll{r}"] = feat[lcols].mean(axis=1)
+
+iso = feat["Week"].dt.isocalendar()
+feat["ISO_Year"] = iso["year"].astype("float32")
+feat["WeekOfYear"] = iso["week"].astype("float32")
+
+emp2id = {e: i for i, e in enumerate(feat["Employee"].unique())}
+feat["EmpID"] = feat["Employee"].map(emp2id).astype("float32")
+
+FEATS = [
+    "ISO_Year", "WeekOfYear", "EmpID", "NominalCap"
+] + [f"lag{i}" for i in LAGS] + [f"roll{r}" for r in ROLLS] + [f"lagBillRatio{i}" for i in LAGS]
+
+X = clean_num(feat, FEATS).to_numpy()
+y = feat["TotalHours_raw"].astype("float32").values
+
+model = MODEL(
+    n_estimators=1200,
+    learning_rate=0.035,
+    max_depth=6,
+    subsample=0.85,
+    colsample_bytree=0.75 if hasattr(MODEL, "objective") else None,
+    min_child_weight=5 if hasattr(MODEL, "objective") else None,
+    random_state=42,
+)
+
+order = np.argsort(feat["Week"].values)
+cut = int(0.8 * len(order))
+X_tr, X_val = X[order[:cut]], X[order[cut:]]
+y_tr, y_val = y[order[:cut]], y[order[cut:]]
+
+model.fit(
+    X_tr, y_tr,
+    eval_set=[(X_val, y_val)],
+    early_stopping_rounds=50,
+    verbose=False
+)
+
+blocks = []
+latest = feat.sort_values(["Employee", "Week"]).groupby("Employee").tail(1)
+
+for h in range(HORIZON_WEEKS):
+    base = latest.copy() if h == 0 else blocks[-1].copy()
+    base["Week"] = base["Week"] + Week(1)
+    base["lag1"] = base["TotalHours_raw"]
+    base["lagBillRatio1"] = base["BillableRatio"]
+    src = latest if h == 0 else blocks[-1]
+    for l in range(2, 13):
+        base[f"lag{l}"] = src[f"lag{l-1}"]
+        base[f"lagBillRatio{l}"] = src[f"lagBillRatio{l-1}"]
+    for r in ROLLS:
+        lcols = [f"lag{i}" for i in range(1, r + 1)]
+        base[f"roll{r}"] = base[lcols].mean(axis=1)
+    iso = base["Week"].dt.isocalendar()
+    base["ISO_Year"] = iso["year"].astype("float32")
+    base["WeekOfYear"] = iso["week"].astype("float32")
+    X_pred = clean_num(base, FEATS)
+    base["TotalHours_raw"] = model.predict(X_pred).astype("float32")
+    base["TotalHours_raw"] = np.maximum(base["TotalHours_raw"], 0.0)
+    base["TotalHours"] = np.minimum(base["TotalHours_raw"], base["NominalCap"])
+    base["BillableRatio"] = base["lagBillRatio1"].clip(0, 1)
+    base["BillableHrs"] = base["TotalHours"] * base["BillableRatio"]
+    base["WeekIdx"] = h + 1
+    blocks.append(base)
+
+fc = pd.concat(blocks, ignore_index=True)
+
+summary = []
+assignments = []
+MED_WK_H = 38
+
+for wk in range(1, HORIZON_WEEKS + 1):
+    wkdf = fc[fc["WeekIdx"] == wk]
+    cap = wkdf["NominalCap"].sum()
+    dem_total = wkdf["TotalHours"].sum()
+    dem_bill = wkdf["BillableHrs"].sum()
+    target_bill = UTIL_TARGET * dem_total
+    gap = max(0, target_bill - dem_bill)
+    need = math.ceil(gap / MED_WK_H)
+    summary.append((wk, cap, dem_total, dem_bill, target_bill, gap, need))
+    spare = wkdf[wkdf["BillableRatio"] < UTIL_TARGET]
+    spare = spare.sort_values("BillableRatio")
+    for i in range(min(need, len(spare))):
+        row = spare.iloc[i]
+        assignments.append((wk, row["Employee"], row["BillableRatio"], "Assign billable"))
+
+s_df = pd.DataFrame(
+    summary,
+    columns=["Week", "Capacity", "TotalHrs", "BillableHrs", "BillTarget", "Gap", "ProjectsNeeded"]
+)
+assign_df = pd.DataFrame(
+    assignments,
+    columns=["Week", "Employee", "BillRatio", "Action"]
+)
+
+with pd.ExcelWriter(OUT_PATH, engine="xlsxwriter") as xl:
+    s_df.to_excel(xl, sheet_name="Summary", index=False)
+    fc.to_excel(xl, sheet_name="Weekly_Forecast", index=False)
+    assign_df.to_excel(xl, sheet_name="Assignments", index=False)
