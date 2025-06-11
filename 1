@@ -1,0 +1,172 @@
+/**
+ * CONFIGURATION — UPDATE THESE ONLY
+ */
+const TEMPLATE_URL      = 'https://docs.google.com/spreadsheets/d/YOUR_TEMPLATE_ID/edit';
+const ROOT_FOLDER_NAME  = 'Quotation - A';
+// If you want a {{SENDER}} placeholder, this will fill it:
+const SENDER_EMAIL      = Session.getEffectiveUser().getEmail();
+
+
+/**
+ * 1) Fires on each new form submit.
+ *    • Copies the 2-sheet template into Quotation–A/BG/month_year
+ *    • Replaces ALL {{PLACEHOLDER}} in those two sheets
+ *    • Logs Timestamp → FileID in “GeneratedFiles”
+ */
+function onFormSubmit(e) {
+  const nv   = e.namedValues;
+  const vals = e.values || [];
+  const get  = k => (nv[k] || [''])[0];    // safe pull
+
+  // Required fields — update these to match your exact column headers
+  const ts          = vals[0] || '';
+  const applicant   = get('Name of the applicant');
+  const recipient   = get('Email Address');         // or your actual email-question header
+  const strCode     = get('STR code');
+  const projectName = get('Project name');
+  const bg          = get('BG');
+  const pg          = get('PG');
+  const pl          = get('PL');
+  const oem         = get('OEM');
+  const sopDate     = get('Expected Date of SOP');
+  const secPeriod   = parseFloat(get('Security maintenance period').replace(/[^0-9.]/g,''))||'';
+  const secContract = get('Security maintenance contract');
+
+  // Folder hierarchy: root → BG → month_year
+  const respSs  = SpreadsheetApp.getActiveSpreadsheet();
+  const parentF = DriveApp.getFileById(respSs.getId()).getParents();
+  const base    = parentF.hasNext() ? parentF.next() : DriveApp.getRootFolder();
+  const rootFd  = getOrCreateFolder_(ROOT_FOLDER_NAME, base);
+  const bgFd    = getOrCreateFolder_(bg, rootFd);
+  const now     = new Date();
+  const monFd   = getOrCreateFolder_(
+    `${now.getMonth()+1}_${now.getFullYear()}`, bgFd
+  );
+
+  // Copy template
+  const tmplId  = extractIdFromUrl_(TEMPLATE_URL);
+  const copyName= `${strCode}_${projectName}_cybersecquotat`;
+  const newFile = DriveApp.getFileById(tmplId).makeCopy(copyName, monFd);
+  const genSs   = SpreadsheetApp.openById(newFile.getId());
+
+  // Build placeholder map
+  const ph = {
+    '{{APPLICANT}}': applicant,
+    '{{RECIPIENT}}': recipient,
+    '{{STR_CODE}}':  strCode,
+    '{{PROJECT}}':   projectName,
+    '{{BG}}':        bg,
+    '{{PG}}':        pg,
+    '{{PL}}':        pl,
+    '{{OEM}}':       oem,
+    '{{SOP_DATE}}':  sopDate,
+    '{{SEC_PERIOD}}':secPeriod,
+    '{{SEC_CONTRACT}}': secContract,
+    '{{YEAR}}':      now.getFullYear(),
+    '{{SENDER}}':    SENDER_EMAIL
+  };
+
+  // Replace on ALL sheets
+  genSs.getSheets().forEach(sh => {
+    Object.keys(ph).forEach(tag => {
+      sh.createTextFinder(tag)
+        .matchCase(true)
+        .replaceAllWith(ph[tag]);
+    });
+  });
+
+  // Log mapping Timestamp → FileID
+  let mapSh = respSs.getSheetByName('GeneratedFiles');
+  if (!mapSh) mapSh = respSs.insertSheet('GeneratedFiles');
+  mapSh.appendRow([ts, newFile.getId()]);
+}
+
+
+/**
+ * 2) Fires on any manual edit of Form Responses.
+ *    • Finds the generated file by Timestamp
+ *    • Re-applies all placeholders on both sheets
+ */
+function onEdit(e) {
+  if (!e || !e.range) return;
+  const respSh = e.range.getSheet();
+  if (respSh.getName() !== 'Form Responses 1') return;
+  const row = e.range.getRow();
+  if (row < 2) return;
+
+  // 1) Lookup file by Timestamp (col A)
+  const ts     = respSh.getRange(row,1).getValue();
+  const fileId = getFileIdForTimestamp(ts);
+  if (!fileId) return;
+
+  // 2) Rebuild placeholder map from edited row
+  const headers = respSh.getRange(1,1,1,respSh.getLastColumn()).getValues()[0];
+  const vals    = respSh.getRange(row,1,1,headers.length).getValues()[0];
+  const nv      = {};
+  headers.forEach((h,i)=> nv[h] = [ vals[i] ]);
+  const get     = k => (nv[k]||[''])[0];
+  const now     = new Date();
+  const ph      = {
+    '{{APPLICANT}}': get('Name of the applicant'),
+    '{{RECIPIENT}}': get('Email Address'),
+    '{{STR_CODE}}':  get('STR code'),
+    '{{PROJECT}}':   get('Project name'),
+    '{{BG}}':        get('BG'),
+    '{{PG}}':        get('PG'),
+    '{{PL}}':        get('PL'),
+    '{{OEM}}':       get('OEM'),
+    '{{SOP_DATE}}':  get('Expected Date of SOP'),
+    '{{SEC_PERIOD}}': parseFloat(get('Security maintenance period').replace(/[^0-9.]/g,''))||'',
+    '{{SEC_CONTRACT}}': get('Security maintenance contract'),
+    '{{YEAR}}':      now.getFullYear(),
+    '{{SENDER}}':    SENDER_EMAIL
+  };
+
+  // 3) Re-open and replace on all sheets
+  const genSs = SpreadsheetApp.openById(fileId);
+  genSs.getSheets().forEach(sh => {
+    Object.keys(ph).forEach(tag => {
+      sh.createTextFinder(tag)
+        .matchCase(true)
+        .replaceAllWith(ph[tag]);
+    });
+  });
+}
+
+
+/**───────────────────────────────────────────────────────────────────────────**/
+/** Helper: find file ID by timestamp in “GeneratedFiles” sheet */
+function getFileIdForTimestamp(ts) {
+  const ss    = SpreadsheetApp.getActiveSpreadsheet();
+  const mapSh = ss.getSheetByName('GeneratedFiles');
+  if (!mapSh) return null;
+  const data  = mapSh.getDataRange().getValues();
+  // ts might be Date, number, or text → compare .getTime()
+  const tval  = (ts instanceof Date) ? ts.getTime()
+              : (typeof ts==='number')  ? ts
+              : Number(new Date(String(ts)).getTime());
+  for (let i=1; i<data.length; i++) {
+    let key = data[i][0];
+    let kval = (key instanceof Date) ? key.getTime()
+            : (typeof key==='number')  ? key
+            : Number(new Date(String(key)).getTime());
+    if (!isNaN(tval) && tval===kval) {
+      return data[i][1];
+    }
+  }
+  return null;
+}
+
+/** Helper: find-or-create folder */
+function getOrCreateFolder_(name, parent) {
+  const it = parent.getFoldersByName(name);
+  if (it.hasNext()) return it.next();
+  return parent.createFolder(name);
+}
+
+/** Helper: extract the file ID from a Sheets URL */
+function extractIdFromUrl_(url) {
+  const m = url.match(/[-\w]{25,}/);
+  if (!m) throw new Error('Invalid TEMPLATE_URL');
+  return m[0];
+}
