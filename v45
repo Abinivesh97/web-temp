@@ -1,0 +1,323 @@
+/**
+ * CONFIG — update these two lines ONLY:
+ */
+// Your 3-sheet template’s full Drive URL (must be Google Sheets)
+const TEMPLATE_URL     = 'https://docs.google.com/spreadsheets/d/YOUR_TEMPLATE_ID/edit';
+// Top-level folder name (will live beside your Form Responses sheet)
+const ROOT_FOLDER_NAME = 'Quotation - A';
+
+
+/**
+ * 1) Fires on every new form submission.
+ */
+function onFormSubmit(e) {
+  const respSs = SpreadsheetApp.getActiveSpreadsheet();
+  const nv     = e.namedValues;                // map: column header → [value]
+  const vals   = e.values;                     // array of values, timestamp first
+
+  // Pull fields (default to '' if blank)
+  const ts          = vals[0]                 || '';
+  const applicant   = nv['Name of the applicant'][0]                      || '';
+  const email       = nv['Please enter the email address to which the quotation has to be sent'][0] || '';
+  const strCode     = nv['STR code'][0]                                   || '';
+  const projectName = nv['Project name'][0]                               || '';
+  const bg          = nv['BG'][0]                                         || '';
+  const pg          = nv['PG'][0]                                         || '';
+  const pl          = nv['PL'][0]                                         || '';
+  const projectType = nv['Project type'][0]                               || '';
+  const oem         = nv['OEM'][0]                                        || '';
+  const milestone   = nv['Current Project Milestone'][0]                  || '';
+  const sopText     = nv['Expected Date of SOP'][0]                       || '';
+  const prodDesc    = nv['Product technical description'][0]              || '';
+  const calLevel    = nv['CAL level of the product'][0]                   || '';
+  const kickoff     = nv['Kick OFF presentation'][0]                      || '';
+  const bom         = nv['Hardware and software bill of materials'][0]    || '';
+  const secPeriod   = parseSecPeriod(nv['Security maintenance period'][0]|| '');
+  const secContract = nv['Security maintenance contract'][0]              || '';
+
+  // ─── Build “Quotation – A” folder tree ───────────────────────
+  const parents = DriveApp.getFileById(respSs.getId()).getParents();
+  const base    = parents.hasNext() ? parents.next() : DriveApp.getRootFolder();
+  const rootFld = getOrCreateFolder_(ROOT_FOLDER_NAME, base);
+  const bgFld   = getOrCreateFolder_(bg, rootFld);
+  const now     = new Date();
+  const monFld  = getOrCreateFolder_(
+    `${now.getMonth()+1}_${now.getFullYear()}`,
+    bgFld
+  );
+
+  // ─── Copy template & open it ────────────────────────────────
+  const tmplId  = extractIdFromUrl_(TEMPLATE_URL);
+  const copyName= `${strCode}_${projectName}_cybersecquotat`;
+  const newFile = DriveApp.getFileById(tmplId)
+                         .makeCopy(copyName, monFld);
+  const genSs   = SpreadsheetApp.openById(newFile.getId());
+
+  // ─── Replace placeholders on ALL sheets ──────────────────────
+  const placeholders = {
+    '{{APPLICANT}}':    applicant,
+    '{{EMAIL}}':        email,
+    '{{STR_CODE}}':     strCode,
+    '{{PROJECT}}':      projectName,
+    '{{BG}}':           bg,
+    '{{PG}}':           pg,
+    '{{PL}}':           pl,
+    '{{TYPE}}':         projectType,
+    '{{OEM}}':          oem,
+    '{{MILESTONE}}':    milestone,
+    '{{SOP_DATE}}':     sopText,
+    '{{DESC}}':         prodDesc,
+    '{{CAL_LEVEL}}':    calLevel,
+    '{{KICKOFF}}':      kickoff,
+    '{{BOM}}':          bom,
+    '{{SEC_PERIOD}}':   secPeriod,
+    '{{SEC_CONTRACT}}': secContract,
+    '{{YEAR}}':         now.getFullYear()
+  };
+  genSs.getSheets().forEach(sheet => {
+    Object.keys(placeholders).forEach(tag => {
+      sheet.createTextFinder(tag)
+           .matchCase(true)
+           .replaceAllWith(placeholders[tag]);
+    });
+  });
+
+  // ─── Prepare the 3rd sheet as “Result” ──────────────────────
+  const result = genSs.getSheets()[2];
+  result.clear(); result.clearFormats();
+  result.setName('Result');
+
+  // headers
+  const hdrs = [
+    'Timestamp','Applicant','Email','STR code','Project','BG','PG','PL',
+    'Type','OEM','Milestone','SOP Date','Desc','CAL Level',
+    'Kickoff','BOM','Sec Period','Sec Contract','Days to SOP',
+    'Missing Fields','Mail Sent'
+  ];
+  result.getRange(1,1,1,hdrs.length).setValues([hdrs]);
+  result.setFrozenRows(1);
+  result.getRange(1,1,1,hdrs.length)
+        .setFontWeight('bold')
+        .setBackground('#D9E1F2')
+        .setHorizontalAlignment('center');
+
+  // compute metrics
+  const sopDate  = sopText ? new Date(sopText) : null;
+  const daysLeft = sopDate
+                   ? Math.round((sopDate - now)/(1000*60*60*24))
+                   : '';
+  const missing  = Object.keys(nv)
+                   .filter(k => !nv[k][0])
+                   .join(', ');
+  // row
+  const row = [
+    ts,applicant,email,strCode,projectName,bg,pg,pl,
+    projectType,oem,milestone,sopDate,prodDesc,calLevel,
+    kickoff,bom,secPeriod,secContract,daysLeft,
+    missing,''
+  ];
+  result.getRange(2,1,1,row.length).setValues([row]);
+  for (let c=1; c<=hdrs.length; c++) result.autoResizeColumn(c);
+  result.getRange(1,1,2,hdrs.length).setBorder(true,true,true,true,true,true);
+
+  // ─── Record mapping: STR,Project → File ID ───────────────────
+  let mapSh = respSs.getSheetByName('GeneratedFiles');
+  if (!mapSh) mapSh = respSs.insertSheet('GeneratedFiles');
+  mapSh.appendRow([strCode, projectName, newFile.getId()]);
+}
+
+
+/**
+ * 2) If an admin edits any response, re-sync that generated file.
+ */
+function onEdit(e) {
+  const sh = e.source.getActiveSheet();
+  if (sh.getName() !== 'Form Responses 1') return;
+  const row = e.range.getRow();
+  if (row < 2) return;
+  updateGeneratedForRow(row);
+}
+
+function updateGeneratedForRow(row) {
+  const respSs   = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet    = respSs.getSheetByName('Form Responses 1');
+  const hdrs     = sheet.getRange(1,1,1,sheet.getLastColumn())
+                        .getValues()[0];
+  const vals     = sheet.getRange(row,1,1,sheet.getLastColumn())
+                        .getValues()[0];
+  const getVal   = name => {
+    const i = hdrs.indexOf(name);
+    return i>=0 ? vals[i] : '';
+  };
+
+  const strCode     = getVal('STR code');
+  const projectName = getVal('Project name');
+  const fileId      = getFileIdFor(strCode, projectName);
+  if (!fileId) return;
+
+  // build the same placeholders as onFormSubmit
+  const now      = new Date();
+  const placeholders = {
+    '{{APPLICANT}}':    getVal('Name of the applicant'),
+    '{{EMAIL}}':        getVal('Please enter the email address to which the quotation has to be sent'),
+    '{{STR_CODE}}':     strCode,
+    '{{PROJECT}}':      projectName,
+    '{{BG}}':           getVal('BG'),
+    '{{PG}}':           getVal('PG'),
+    '{{PL}}':           getVal('PL'),
+    '{{TYPE}}':         getVal('Project type'),
+    '{{OEM}}':          getVal('OEM'),
+    '{{MILESTONE}}':    getVal('Current Project Milestone'),
+    '{{SOP_DATE}}':     getVal('Expected Date of SOP'),
+    '{{DESC}}':         getVal('Product technical description'),
+    '{{CAL_LEVEL}}':    getVal('CAL level of the product'),
+    '{{KICKOFF}}':      getVal('Kick OFF presentation'),
+    '{{BOM}}':          getVal('Hardware and software bill of materials'),
+    '{{SEC_PERIOD}}':   parseSecPeriod(getVal('Security maintenance period')),
+    '{{SEC_CONTRACT}}': getVal('Security maintenance contract'),
+    '{{YEAR}}':         now.getFullYear()
+  };
+
+  // open & apply
+  const genSs = SpreadsheetApp.openById(fileId);
+  genSs.getSheets().forEach(s => {
+    Object.keys(placeholders).forEach(tag => {
+      s.createTextFinder(tag)
+       .matchCase(true)
+       .replaceAllWith(placeholders[tag]);
+    });
+  });
+
+  // update Result row 2
+  const res = genSs.getSheetByName('Result');
+  if (!res) return;
+  const sopDate  = placeholders['{{SOP_DATE}}']
+                   ? new Date(placeholders['{{SOP_DATE}}'])
+                   : null;
+  const daysLeft = sopDate
+                   ? Math.round((sopDate - now)/(1000*60*60*24))
+                   : '';
+  const missing  = Object.keys(placeholders)
+                   .filter(k => placeholders[k]==='')
+                   .map(k => k.replace(/{{|}}/g,''))
+                   .join(', ');
+  const rowData = [
+    vals[0], placeholders['{{APPLICANT}}'], placeholders['{{EMAIL}}'],
+    strCode, projectName, placeholders['{{BG}}'], placeholders['{{PG}}'],
+    placeholders['{{PL}}'], placeholders['{{TYPE}}'], placeholders['{{OEM}}'],
+    placeholders['{{MILESTONE}}'], sopDate, placeholders['{{DESC}}'],
+    placeholders['{{CAL_LEVEL}}'], placeholders['{{KICKOFF}}'],
+    placeholders['{{BOM}}'], placeholders['{{SEC_PERIOD}}'],
+    placeholders['{{SEC_CONTRACT}}'], daysLeft, missing,
+    res.getRange(2, hdrs.length+1).getValue()  // preserve existing Mail Sent
+  ];
+  res.getRange(2,1,1,rowData.length).setValues([rowData]);
+}
+
+
+/**
+ * 3) Manually run this (▶️ sendReminder) with a Form-Responses row selected.
+ *    Attaches an .xlsx containing only Sheet1 & Sheet2 of the generated file.
+ */
+function sendReminder() {
+  const respSs   = SpreadsheetApp.getActiveSpreadsheet();
+  const sheet    = respSs.getActiveSheet();
+  if (sheet.getName() !== 'Form Responses 1') {
+    throw new Error('Select a row in the Form Responses sheet.');
+  }
+  const row = sheet.getActiveRange().getRow();
+  if (row < 2) throw new Error('Select a data row.');
+
+  // gather row
+  const hdrs = sheet.getRange(1,1,1,sheet.getLastColumn()).getValues()[0];
+  const vals = sheet.getRange(row,1,1,sheet.getLastColumn()).getValues()[0];
+  const getVal = h => {
+    const i = hdrs.indexOf(h);
+    return i>=0 ? vals[i] : '';
+  };
+  const strCode     = getVal('STR code');
+  const projectName = getVal('Project name');
+  const email       = getVal('Please enter the email address to which the quotation has to be sent');
+  const fileId      = getFileIdFor(strCode, projectName);
+  if (!fileId) throw new Error('No generated file found for this row.');
+
+  // create a temporary spreadsheet with only sheet1 & sheet2
+  const genSs       = SpreadsheetApp.openById(fileId);
+  const sheetsToCopy= [ genSs.getSheets()[0], genSs.getSheets()[1] ];
+  const tmp         = SpreadsheetApp.create('TempExport');
+  sheetsToCopy.forEach(sh => sh.copyTo(tmp));
+  tmp.deleteSheet(tmp.getSheets()[0]); // remove default blank
+
+  // export as XLSX via Drive API
+  const exportUrl   =
+    'https://docs.google.com/spreadsheets/d/' + tmp.getId() +
+    '/export?format=xlsx';
+  const token       = ScriptApp.getOAuthToken();
+  const resp        = UrlFetchApp.fetch(exportUrl, {
+    headers: { Authorization: 'Bearer ' + token }
+  });
+  const xlsxBlob    = resp.getBlob()
+                          .setName(`${strCode}_${projectName}.xlsx`);
+
+  // send the email
+  MailApp.sendEmail({
+    to:       email,
+    subject:  'Quotation – Your Requested Files',
+    body:     `Hello ${getVal('Name of the applicant')},
+
+Please find attached the quotation sheets.
+
+Thank you.`,
+    attachments: [ xlsxBlob ]
+  });
+
+  // clean up
+  DriveApp.getFileById(tmp.getId()).setTrashed(true);
+
+  // stamp “Mail Sent” in the generated file’s Result sheet
+  const genRes = genSs.getSheetByName('Result');
+  const mailCol = hdrs.length + 1; // “Mail Sent” is the last column in Result
+  genRes.getRange(2, mailCol).setValue(new Date());
+}
+
+
+/**───────────────────────────────────────────────────────────────────────────**/
+/** Helpers **/
+
+// strip non-digits and parse to number
+function parseSecPeriod(txt) {
+  const num = parseFloat((txt||'').toString().replace(/[^0-9.]/g,''));
+  return isNaN(num) ? '' : num;
+}
+
+// find-or-create a folder by name under “parent” (or Drive root)
+function getOrCreateFolder_(name, parent) {
+  const it = parent
+    ? parent.getFoldersByName(name)
+    : DriveApp.getFoldersByName(name);
+  if (it.hasNext()) return it.next();
+  return parent
+    ? parent.createFolder(name)
+    : DriveApp.createFolder(name);
+}
+
+// extract the “long ID” from a typical Google Sheets URL
+function extractIdFromUrl_(url) {
+  const m = url.match(/[-\w]{25,}/);
+  if (!m) throw new Error('Cannot parse file ID from URL: ' + url);
+  return m[0];
+}
+
+// look up the generated file ID for a given STR+Project (from GeneratedFiles sheet)
+function getFileIdFor(strCode, projectName) {
+  const ss     = SpreadsheetApp.getActiveSpreadsheet();
+  const mapSh  = ss.getSheetByName('GeneratedFiles');
+  if (!mapSh) return '';
+  const data   = mapSh.getDataRange().getValues();
+  for (let i=1; i<data.length; i++) {
+    if (data[i][0] === strCode && data[i][1] === projectName) {
+      return data[i][2];
+    }
+  }
+  return '';
+}
