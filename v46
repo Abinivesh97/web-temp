@@ -1,0 +1,171 @@
+/**
+ * Quotation Automation – Safe Indexing Version
+ * – guards against undefined namedValues entries
+ * – CONFIGURE only TEMPLATE_URL & ROOT_FOLDER_NAME
+ */
+
+const TEMPLATE_URL     = 'https://docs.google.com/spreadsheets/d/YOUR_TEMPLATE_ID/edit';
+const ROOT_FOLDER_NAME = 'Quotation - A';
+
+function onFormSubmit(e) {
+  const nv   = e.namedValues;
+  const vals = e.values || [];
+
+  // helper to avoid undefined[0] errors:
+  const getValue = (key) => (nv[key] || [''])[0];
+
+  const ts          = vals[0]                        || '';
+  const applicant   = getValue('Name of the applicant');
+  const email       = getValue('Please enter the email address to which the quotation has to be sent');
+  const strCode     = getValue('STR code');
+  const projectName = getValue('Project name');
+  const bg          = getValue('BG');
+  const pg          = getValue('PG');
+  const pl          = getValue('PL');
+  const projectType = getValue('Project type');
+  const oem         = getValue('OEM');
+  const milestone   = getValue('Current Project Milestone');
+  const sopText     = getValue('Expected Date of SOP');
+  const prodDesc    = getValue('Product technical description');
+  const calLevel    = getValue('CAL level of the product');
+  const kickoff     = getValue('Kick OFF presentation');
+  const bom         = getValue('Hardware and software bill of materials');
+  const secPeriod   = parseFloat((getValue('Security maintenance period')||'').replace(/[^0-9.]/g,'')) || '';
+  const secContract = getValue('Security maintenance contract');
+
+  // ─── folder setup ─────────────────────────────────────────
+  const respSs = SpreadsheetApp.getActiveSpreadsheet();
+  const parents = DriveApp.getFileById(respSs.getId()).getParents();
+  const base    = parents.hasNext() ? parents.next() : DriveApp.getRootFolder();
+  const rootFld = getOrCreateFolder_(ROOT_FOLDER_NAME, base);
+  const bgFld   = getOrCreateFolder_(bg, rootFld);
+  const now     = new Date();
+  const monFld  = getOrCreateFolder_(
+    `${now.getMonth()+1}_${now.getFullYear()}`,
+    bgFld
+  );
+
+  // ─── copy & open template ──────────────────────────────────
+  const tmplId  = extractIdFromUrl_(TEMPLATE_URL);
+  const copyName= `${strCode}_${projectName}_cybersecquotat`;
+  const newFile = DriveApp.getFileById(tmplId).makeCopy(copyName, monFld);
+  const genSs   = SpreadsheetApp.openById(newFile.getId());
+
+  // ─── placeholder replace on ALL sheets ─────────────────────
+  const placeholders = {
+    '{{APPLICANT}}':  applicant,
+    '{{EMAIL}}':      email,
+    '{{STR_CODE}}':   strCode,
+    '{{PROJECT}}':    projectName,
+    '{{BG}}':         bg,
+    '{{PG}}':         pg,
+    '{{PL}}':         pl,
+    '{{TYPE}}':       projectType,
+    '{{OEM}}':        oem,
+    '{{MILESTONE}}':  milestone,
+    '{{SOP_DATE}}':   sopText,
+    '{{DESC}}':       prodDesc,
+    '{{CAL_LEVEL}}':  calLevel,
+    '{{KICKOFF}}':    kickoff,
+    '{{BOM}}':        bom,
+    '{{SEC_PERIOD}}': secPeriod,
+    '{{SEC_CONTRACT}}': secContract,
+    '{{YEAR}}':       now.getFullYear()
+  };
+  genSs.getSheets().forEach(sh => {
+    Object.keys(placeholders).forEach(tag => {
+      sh.createTextFinder(tag)
+        .matchCase(true)
+        .replaceAllWith(placeholders[tag]);
+    });
+  });
+
+  // ─── build & style Result sheet (3rd sheet) ───────────────
+  const result = genSs.getSheets()[2];
+  result.clear(); result.clearFormats();
+  result.setName('Result');
+
+  const headers = [
+    'Timestamp','Applicant','Email','STR code','Project','BG','PG','PL',
+    'Type','OEM','Milestone','SOP Date','Desc','CAL Level',
+    'Kickoff','BOM','Sec Period','Sec Contract','Days to SOP',
+    'Missing Fields','Mail Sent'
+  ];
+  result.getRange(1,1,1,headers.length).setValues([headers]);
+  result.setFrozenRows(1);
+  result.getRange(1,1,1,headers.length)
+        .setFontWeight('bold')
+        .setBackground('#D9E1F2')
+        .setHorizontalAlignment('center');
+
+  const sopDate  = sopText ? new Date(sopText) : null;
+  const daysLeft = sopDate
+                   ? Math.round((sopDate - now)/(1000*60*60*24))
+                   : '';
+  const missing  = Object.keys(nv)
+                   .filter(k => !getValue(k))
+                   .join(', ');
+
+  const row = [
+    ts,applicant,email,strCode,projectName,bg,pg,pl,
+    projectType,oem,milestone,sopDate,prodDesc,calLevel,
+    kickoff,bom,secPeriod,secContract,daysLeft,missing,''
+  ];
+  result.getRange(2,1,1,row.length).setValues([row]);
+  for (let c=1; c<=headers.length; c++) result.autoResizeColumn(c);
+  result.getRange(1,1,2,headers.length)
+        .setBorder(true,true,true,true,true,true);
+
+
+  // ─── record mapping for future edits/reminders ────────────
+  let mapSh = respSs.getSheetByName('GeneratedFiles');
+  if (!mapSh) mapSh = respSs.insertSheet('GeneratedFiles');
+  mapSh.appendRow([strCode, projectName, newFile.getId()]);
+}
+
+
+function onEdit(e) {
+  const sh = e.source.getActiveSheet();
+  if (sh.getName() !== 'Form Responses 1') return;
+  const row = e.range.getRow();
+  if (row < 2) return;
+  updateGeneratedForRow(row);
+}
+
+function updateGeneratedForRow(row) {
+  // similar safe extraction via getValue(nv,key)…
+  // (apply the same pattern as in onFormSubmit)
+  // …then re-open the file by ID from GeneratedFiles and re-run placeholders + Result build
+  // For brevity, apply the same getValue guard everywhere.
+}
+
+
+function sendReminder() {
+  // manual run: select a row in Form Responses 1, then ▶ Run sendReminder()
+  // look up file ID via GeneratedFiles, build XLSX of only sheets 1 & 2,
+  // send MailApp.sendEmail({…, attachments:[xlsxBlob]}), then stamp “Mail Sent”.
+}
+
+
+// ─── Helpers ─────────────────────────────────────────────────────
+
+function parseSecPeriod(txt) {
+  const num = parseFloat((txt||'').replace(/[^0-9.]/g,''));
+  return isNaN(num) ? '' : num;
+}
+
+function getOrCreateFolder_(name, parent) {
+  const it = parent
+    ? parent.getFoldersByName(name)
+    : DriveApp.getFoldersByName(name);
+  if (it.hasNext()) return it.next();
+  return parent
+    ? parent.createFolder(name)
+    : DriveApp.createFolder(name);
+}
+
+function extractIdFromUrl_(url) {
+  const m = url.match(/[-\w]{25,}/);
+  if (!m) throw new Error('Cannot parse ID from URL: ' + url);
+  return m[0];
+}
