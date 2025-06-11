@@ -1,0 +1,135 @@
+/**
+ * Re-syncs a generated quotation whenever someone edits a response.
+ * Install as an “On edit” trigger (From spreadsheet → On edit).
+ */
+function onEdit(e) {
+  if (!e || !e.range) return;                              // guard
+  const respSh = e.range.getSheet();
+  if (respSh.getName() !== 'Form Responses 1') return;     // only this sheet
+  const row = e.range.getRow();
+  if (row < 2) return;                                     // skip header
+
+  // 1) Read the Timestamp from column A
+  const ts = respSh.getRange(row, 1).getValue();
+  if (!ts) return;
+
+  // 2) Look up the generated file ID
+  const fileId = getFileIdForTimestamp(ts);
+  if (!fileId) return;
+
+  // 3) Open the generated spreadsheet
+  const genSs = SpreadsheetApp.openById(fileId);
+
+  // 4) Re–collect the updated row values
+  const headers = respSh.getRange(1,1,1,respSh.getLastColumn()).getValues()[0];
+  const rowVals = respSh.getRange(row,1,1,headers.length).getValues()[0];
+  const nv = {};
+  headers.forEach((h,i) => nv[h] = [ rowVals[i] ]);
+
+  // helper to avoid undefined[0] errors
+  const getValue = key => (nv[key]||[''])[0];
+
+  // 5) Build the same placeholder map you use on submit
+  const now      = new Date();
+  const placeholders = {
+    '{{APPLICANT}}':    getValue('Name of the applicant'),
+    '{{RECIPIENT}}':    getValue('Please enter the email address to which the quotation has to be sent'),
+    '{{STR_CODE}}':     getValue('STR code'),
+    '{{PROJECT}}':      getValue('Project name'),
+    '{{BG}}':           getValue('BG'),
+    '{{PG}}':           getValue('PG'),
+    '{{PL}}':           getValue('PL'),
+    '{{TYPE}}':         getValue('Project type'),
+    '{{OEM}}':          getValue('OEM'),
+    '{{MILESTONE}}':    getValue('Current Project Milestone'),
+    '{{SOP_DATE}}':     getValue('Expected Date of SOP'),
+    '{{DESC}}':         getValue('Product technical description'),
+    '{{CAL_LEVEL}}':    getValue('CAL level of the product'),
+    '{{KICKOFF}}':      getValue('Kick OFF presentation'),
+    '{{BOM}}':          getValue('Hardware and software bill of materials'),
+    '{{SEC_PERIOD}}':   parseFloat(getValue('Security maintenance period').replace(/[^0-9.]/g,''))||'',
+    '{{SEC_CONTRACT}}': getValue('Security maintenance contract'),
+    '{{YEAR}}':         now.getFullYear(),
+    '{{SENDER}}':       SENDER_EMAIL   // from your top-level const
+  };
+
+  // 6) Re­apply placeholders on **all** sheets
+  genSs.getSheets().forEach(sh=>{
+    Object.keys(placeholders).forEach(tag=>{
+      sh.createTextFinder(tag)
+        .matchCase(true)
+        .replaceAllWith(placeholders[tag]);
+    });
+  });
+
+  // 7) Clear & rebuild the 3rd sheet as “Result”
+  const result = genSs.getSheets()[2];
+  result.clear(); result.clearFormats();
+  result.setName('Result');
+
+  // headers & styling (same as onFormSubmit)
+  const hdrs = [
+    'Timestamp','Applicant','Email','STR code','Project','BG','PG','PL',
+    'Type','OEM','Milestone','SOP Date','Desc','CAL Level',
+    'Kickoff','BOM','Sec Period','Sec Contract','Days to SOP',
+    'Missing Fields','Mail Sent'
+  ];
+  result.getRange(1,1,1,hdrs.length)
+        .setValues([hdrs])
+        .setFontWeight('bold')
+        .setBackground('#D9E1F2')
+        .setHorizontalAlignment('center');
+  result.setFrozenRows(1);
+
+  // compute Days to SOP & missing fields
+  const sopDate  = getValue('Expected Date of SOP') ? new Date(getValue('Expected Date of SOP')) : null;
+  const daysLeft = sopDate ? Math.round((sopDate - now)/(1000*60*60*24)) : '';
+  const missing  = headers
+                   .filter(h=>!getValue(h))
+                   .join(', ');
+
+  // write row 2
+  const dataRow = [
+    ts,
+    getValue('Name of the applicant'),
+    getValue('Please enter the email address to which the quotation has to be sent'),
+    getValue('STR code'),
+    getValue('Project name'),
+    getValue('BG'),
+    getValue('PG'),
+    getValue('PL'),
+    getValue('Project type'),
+    getValue('OEM'),
+    getValue('Current Project Milestone'),
+    sopDate,
+    getValue('Product technical description'),
+    getValue('CAL level of the product'),
+    getValue('Kick OFF presentation'),
+    getValue('Hardware and software bill of materials'),
+    parseFloat(getValue('Security maintenance period').replace(/[^0-9.]/g,'')) || '',
+    getValue('Security maintenance contract'),
+    daysLeft,
+    missing,
+    result.getRange(2, hdrs.length).getValue()  // preserve existing “Mail Sent”
+  ];
+  result.getRange(2,1,1,dataRow.length).setValues([dataRow]);
+
+  // auto-resize & border
+  for(let c=1;c<=hdrs.length;c++) result.autoResizeColumn(c);
+  result.getRange(1,1,2,hdrs.length).setBorder(true,true,true,true,true,true);
+}
+
+
+/** Helper: find file ID by timestamp in GeneratedFiles sheet **/
+function getFileIdForTimestamp(ts) {
+  const ss    = SpreadsheetApp.getActiveSpreadsheet();
+  const mapSh = ss.getSheetByName('GeneratedFiles');
+  if(!mapSh) return null;
+  const rows  = mapSh.getDataRange().getValues();
+  for(let i=1;i<rows.length;i++){
+    if(rows[i][0]===ts) return rows[i][1];
+  }
+  return null;
+}
+
+// (Plus your existing parseSecPeriod, getOrCreateFolder_, extractIdFromUrl_, etc.)
