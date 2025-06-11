@@ -1,0 +1,150 @@
+/**
+ * Fires on manual edits to “Form Responses 1”
+ * Fully re-copies the 3-sheet template into the existing file,
+ * reapplies ALL {{PLACEHOLDER}} tags, and rebuilds the Result tab
+ * (WITHOUT any SOP date math).
+ */
+function onEdit(e) {
+  if (!e || !e.range) return;
+  const respSh = e.range.getSheet();
+  if (respSh.getName() !== 'Form Responses 1') return;
+  const row = e.range.getRow();
+  if (row < 2) return;
+  
+  // 1) Grab Timestamp from column A
+  const ts = respSh.getRange(row, 1).getValue();
+  if (!ts) return;
+  
+  // 2) Lookup the file ID from GeneratedFiles by timestamp
+  const fileId = getFileIdForTimestamp(ts);
+  if (!fileId) return;
+  
+  // 3) Re-generate that file from the template
+  regenerateFromTemplateSimplified(fileId, respSh, row);
+}
+
+
+/**
+ * Deletes all sheets in the generated file, copies in each sheet
+ * from your TEMPLATE_URL, reapplies placeholders, and rebuilds
+ * the Result tab WITHOUT calculating Days to SOP.
+ */
+function regenerateFromTemplateSimplified(fileId, respSh, row) {
+  const genSs   = SpreadsheetApp.openById(fileId);
+  const tmplId  = extractIdFromUrl_(TEMPLATE_URL);
+  const tmplSs  = SpreadsheetApp.openById(tmplId);
+  const now     = new Date();
+  
+  // A) delete existing sheets
+  genSs.getSheets().forEach(sh => genSs.deleteSheet(sh));
+  
+  // B) copy all sheets from the template
+  tmplSs.getSheets().forEach(tsheet => {
+    const c = tsheet.copyTo(genSs);
+    c.setName(tsheet.getName());
+  });
+  
+  // C) re-read the edited response row into namedValues
+  const headers = respSh.getRange(1,1,1,respSh.getLastColumn())
+                        .getValues()[0];
+  const vals    = respSh.getRange(row,1,1,headers.length)
+                        .getValues()[0];
+  const nv      = {};
+  headers.forEach((h,i)=> nv[h]=[vals[i]]);
+  const getValue = key => (nv[key]||[''])[0];
+  
+  // D) build your placeholder map (include SENDER if you like)
+  const placeholders = {
+    '{{APPLICANT}}':  getValue('Name of the applicant'),
+    '{{RECIPIENT}}':  getValue('Please enter the email address to which the quotation has to be sent'),
+    '{{STR_CODE}}':   getValue('STR code'),
+    '{{PROJECT}}':    getValue('Project name'),
+    '{{BG}}':         getValue('BG'),
+    '{{PG}}':         getValue('PG'),
+    '{{PL}}':         getValue('PL'),
+    '{{TYPE}}':       getValue('Project type'),
+    '{{OEM}}':        getValue('OEM'),
+    '{{MILESTONE}}':  getValue('Current Project Milestone'),
+    '{{SOP_DATE}}':   getValue('Expected Date of SOP'),
+    '{{DESC}}':       getValue('Product technical description'),
+    '{{CAL_LEVEL}}':  getValue('CAL level of the product'),
+    '{{KICKOFF}}':    getValue('Kick OFF presentation'),
+    '{{BOM}}':        getValue('Hardware and software bill of materials'),
+    '{{SEC_PERIOD}}': parseFloat(getValue('Security maintenance period').replace(/[^0-9.]/g,''))||'',
+    '{{SEC_CONTRACT}}': getValue('Security maintenance contract'),
+    '{{YEAR}}':       now.getFullYear(),
+    '{{SENDER}}':     SENDER_EMAIL
+  };
+  
+  // E) apply placeholders everywhere
+  genSs.getSheets().forEach(sh=>{
+    Object.keys(placeholders).forEach(tag=>{
+      sh.createTextFinder(tag)
+        .matchCase(true)
+        .replaceAllWith(placeholders[tag]);
+    });
+  });
+  
+  // F) rebuild the Result sheet (third sheet)
+  const result = genSs.getSheets()[2];
+  result.clear(); result.clearFormats();
+  result.setName('Result');
+  
+  const hdrs = [
+    'Timestamp','Applicant','Email','STR code','Project','BG','PG','PL',
+    'Type','OEM','Milestone','SOP Date','Desc','CAL Level',
+    'Kickoff','BOM','Sec Period','Sec Contract',
+    'Missing Fields','Mail Sent'
+  ];
+  result.getRange(1,1,1,hdrs.length)
+        .setValues([hdrs])
+        .setFontWeight('bold')
+        .setBackground('#D9E1F2')
+        .setHorizontalAlignment('center');
+  result.setFrozenRows(1);
+  
+  // collect missing fields
+  const missing = hdrs
+    .filter(h=> !getValue(h))
+    .join(', ');
+  
+  // data row (note: no Days to SOP)
+  const rowData = [
+    getValue('Timestamp'),
+    getValue('Name of the applicant'),
+    getValue('Please enter the email address to which the quotation has to be sent'),
+    getValue('STR code'),
+    getValue('Project name'),
+    getValue('BG'),
+    getValue('PG'),
+    getValue('PL'),
+    getValue('Project type'),
+    getValue('OEM'),
+    getValue('Current Project Milestone'),
+    getValue('Expected Date of SOP'),
+    getValue('Product technical description'),
+    getValue('CAL level of the product'),
+    getValue('Kick OFF presentation'),
+    getValue('Hardware and software bill of materials'),
+    parseFloat(getValue('Security maintenance period').replace(/[^0-9.]/g,''))||'',
+    getValue('Security maintenance contract'),
+    missing,
+    ''   // Mail Sent stays blank
+  ];
+  result.getRange(2,1,1,rowData.length).setValues([rowData]);
+  for(let c=1;c<=hdrs.length;c++) result.autoResizeColumn(c);
+  result.getRange(1,1,2,hdrs.length).setBorder(true,true,true,true,true,true);
+}
+
+
+/** Helper: find file ID by timestamp in GeneratedFiles sheet **/
+function getFileIdForTimestamp(ts) {
+  const ss    = SpreadsheetApp.getActiveSpreadsheet();
+  const mapSh = ss.getSheetByName('GeneratedFiles');
+  if (!mapSh) return null;
+  const data  = mapSh.getDataRange().getValues();
+  for (let i=1; i<data.length; i++) {
+    if (data[i][0] === ts) return data[i][1];
+  }
+  return null;
+}
