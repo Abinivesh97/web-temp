@@ -1,0 +1,198 @@
+/*** CONFIG — only edit these ***/ 
+const TEMPLATE_URL     = 'https://docs.google.com/spreadsheets/d/14ggCag34IY4i9ghaMnUtr0dp__cjx7ihM3AQqmZWoQk/edit';
+const ROOT_FOLDER_NAME = 'Quotation - A';
+const SENDER_EMAIL     = Session.getEffectiveUser().getEmail();
+
+/*** Month names dictionary ***/
+const MONTH_NAMES = [
+  'January','February','March','April','May','June',
+  'July','August','September','October','November','December'
+];
+
+/*** Form‐header → placeholder tag map ***/
+const FIELD_MAP = {
+  'Name of the applicant':                   '{{APPLICANT}}',
+  'Please enter the email address to which the quotation has to be sent to': '{{RECIPIENT}}',
+  'Project description':                     '{{PROJECT_DESCRIPTION}}',
+  'STR code':                                '{{STR_CODE}}',
+  'Project name':                            '{{PROJECT_NAME}}',
+  'BG':                                      '{{BG}}',
+  'PG':                                      '{{PG}}',
+  'PL':                                      '{{PL}}',
+  'Product Type':                            '{{PRODUCT_TYPE}}',
+  'OEM':                                     '{{OEM}}',
+  'Current Project Milestone':               '{{CURRENT_PROJECT_MILESTONE}}',
+  'Expected date of SOP':                    '{{EXPECTED_DATE_OF_SOP}}',
+  'Product Technical Description':           '{{PRODUCT_TECHNICAL_DESCRIPTION}}',
+  'CAL level of the product':                '{{CAL_LEVEL_OF_THE_PRODUCT}}',
+  'Kick-Off Presentation':                   '{{KICKOFF_PRESENTATION}}',
+  'Hardware and Software Bill of Materials': '{{HARDWARE_SOFTWARE_BOM}}',
+  'Security Maintenance Period':             '{{SECURITY_MAINTENANCE_PERIOD}}',
+  'Security Maintenance Contract':           '{{SECURITY_MAINTENANCE_CONTRACT}}'
+};
+
+
+/*──────────────────────────────────────────────────────────────*/
+/* 1) onFormSubmit                                             */
+/*──────────────────────────────────────────────────────────────*/
+function onFormSubmit(e) {
+  const nv   = e.namedValues;
+  const vals = e.values || [];
+  const get  = k => (nv[k]||[''])[0];
+  const ts   = vals[0] || '';
+
+  /* build placeholder map */
+  const now  = new Date();
+  const data = {};
+  for (const [hdr, tag] of Object.entries(FIELD_MAP)) {
+    let v = get(hdr);
+    if (hdr === 'Security Maintenance Period') v = parseFloat(v.replace(/[^0-9.]/g,''))||'';
+    data[tag] = v;
+  }
+  data['{{YEAR}}']   = now.getFullYear();
+  data['{{SENDER}}'] = SENDER_EMAIL;
+
+  /* folder tree */
+  const respSs = SpreadsheetApp.getActiveSpreadsheet();
+  const parent = DriveApp.getFileById(respSs.getId()).getParents().next();
+  const rootFd = getOrCreateFolder_(ROOT_FOLDER_NAME, parent);
+  const bgFd   = getOrCreateFolder_(get('BG'), rootFd);
+  const monFd  = getOrCreateFolder_(
+    `${MONTH_NAMES[now.getMonth()]}_${now.getFullYear()}`,
+    bgFd
+  );
+
+  /* copy template */
+  const tmplId   = extractIdFromUrl_(TEMPLATE_URL);
+  const copyName = `${get('STR code')}_${get('Project name')}_cyberwatch`;
+  const copyFile = DriveApp.getFileById(tmplId).makeCopy(copyName, monFd);
+  const genSs    = SpreadsheetApp.openById(copyFile.getId());
+
+  /* replace placeholders everywhere */
+  genSs.getSheets().forEach(sh=>{
+    for (const [tag,val] of Object.entries(data)) {
+      sh.createTextFinder(tag).matchCase(true).replaceAllWith(val);
+    }
+  });
+
+  /* log Timestamp → FileID */
+  let mapSh = respSs.getSheetByName('GeneratedFiles');
+  if (!mapSh) mapSh = respSs.insertSheet('GeneratedFiles');
+  mapSh.appendRow([ts, copyFile.getId()]);
+
+  /* write File-ID back to the response row */
+  const formSh    = respSs.getSheetByName('Form Responses 1');
+  const lastRow   = formSh.getLastRow();
+  let idColIndex  = formSh
+    .getRange(1,1,1,formSh.getLastColumn())
+    .getValues()[0]
+    .indexOf('Generated File ID');
+  if (idColIndex === -1) {
+    idColIndex = formSh.getLastColumn() + 1;
+    formSh.getRange(1, idColIndex).setValue('Generated File ID');
+  } else {
+    idColIndex += 1;
+  }
+  formSh.getRange(lastRow, idColIndex).setValue(copyFile.getId());
+}
+
+
+/*──────────────────────────────────────────────────────────────*/
+/* 2) handleEdit (installable)                                  */
+/*    — trash & re-copy template, refill, update File-ID      */
+/*──────────────────────────────────────────────────────────────*/
+function handleEdit(e) {
+  if (!e || !e.range) return;
+  const respSh = e.range.getSheet();
+  if (respSh.getName() !== 'Form Responses 1') return;
+  const row = e.range.getRow();
+  if (row < 2) return;
+
+  /* gather headers + row values */
+  const hdrs = respSh.getRange(1,1,1,respSh.getLastColumn()).getValues()[0];
+  const vals = respSh.getRange(row,1,1,hdrs.length).getValues()[0];
+  const get  = k => vals[ hdrs.indexOf(k) ] || '';
+  const ts   = vals[0];        // original timestamp
+  const now  = new Date();
+
+  /* find old File-ID (new column or fallback) */
+  let fileId = '';
+  const idIdx = hdrs.indexOf('Generated File ID');
+  if (idIdx !== -1) fileId = vals[idIdx] || '';
+  if (!fileId) fileId = getFileIdForTimestamp(ts);
+  if (!fileId) return;
+
+  /* trash old copy */
+  const oldFile = DriveApp.getFileById(fileId);
+  const folder  = oldFile.getParents().next();
+  oldFile.setTrashed(true);
+
+  /* rebuild placeholder map */
+  const data = {};
+  for (const [hdr, tag] of Object.entries(FIELD_MAP)) {
+    let v = get(hdr);
+    if (hdr === 'Security Maintenance Period') v = parseFloat(String(v).replace(/[^0-9.]/g,''))||'';
+    data[tag] = v;
+  }
+  data['{{YEAR}}']   = now.getFullYear();
+  data['{{SENDER}}'] = SENDER_EMAIL;
+
+  /* re-copy template */
+  const tmplId   = extractIdFromUrl_(TEMPLATE_URL);
+  const copyName = `${get('STR code')}_${get('Project name')}_cyberwatch`;
+  const copyFile = DriveApp.getFileById(tmplId).makeCopy(copyName, folder);
+  const genSs    = SpreadsheetApp.openById(copyFile.getId());
+
+  /* refill placeholders */
+  genSs.getSheets().forEach(sh=>{
+    for (const [tag,val] of Object.entries(data)) {
+      sh.createTextFinder(tag).matchCase(true).replaceAllWith(val);
+    }
+  });
+
+  /* overwrite File-ID in the response row */
+  if (idIdx === -1) {
+    const newCol = respSh.getLastColumn() + 1;
+    respSh.getRange(1,newCol).setValue('Generated File ID');
+    respSh.getRange(row,newCol).setValue(copyFile.getId());
+  } else {
+    respSh.getRange(row, idIdx+1).setValue(copyFile.getId());
+  }
+
+  /* log new mapping too (optional) */
+  let mapSh = respSh.getParent().getSheetByName('GeneratedFiles');
+  if (!mapSh) mapSh = respSh.getParent().insertSheet('GeneratedFiles');
+  mapSh.appendRow([ts, copyFile.getId()]);
+}
+
+
+/*──────────────────────────────────────────────────────────────*/
+/* HELPERS (unchanged)                                          */
+/*──────────────────────────────────────────────────────────────*/
+function getFileIdForTimestamp(ts) {
+  const mapSh = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('GeneratedFiles');
+  if (!mapSh) return null;
+  const rows = mapSh.getDataRange().getValues();
+  const tval = ts instanceof Date ? ts.getTime()
+             : typeof ts==='number' ? ts
+             : Number(new Date(String(ts)).getTime());
+  for (let i=1; i<rows.length; i++) {
+    const key  = rows[i][0];
+    const kval = key instanceof Date   ? key.getTime()
+               : typeof key === 'number' ? key
+               : Number(new Date(String(key)).getTime());
+    if (!isNaN(tval) && tval===kval) return rows[i][1];
+  }
+  return null;
+}
+
+function getOrCreateFolder_(name, parent) {
+  const it = parent.getFoldersByName(name);
+  return it.hasNext() ? it.next() : parent.createFolder(name);
+}
+
+function extractIdFromUrl_(url) {
+  const m = url.match(/[-\w]{25,}/);
+  if (!m) throw new Error('Invalid TEMPLATE_URL');
+  return m[0];
+}
