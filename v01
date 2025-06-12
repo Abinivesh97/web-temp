@@ -1,0 +1,118 @@
+Slide 1 – Title
+Comprehensive Data Analytics Framework for Project Management
+
+Executive Overview
+
+Slide 2 – Objective
+Predict employee workloads and project demands
+
+Optimize resource allocation
+
+Identify gaps proactively to ensure efficient utilization
+
+Slide 3 – Why Data Analytics in PM?
+Transforms past data into forward-looking insights
+
+Enables proactive rather than reactive decision-making
+
+Balances productivity, timelines, resources, and budget
+
+Slide 4 – Benefits (Merits)
+Proactive resource allocation
+
+Enhanced efficiency & utilization
+
+Early risk detection and mitigation
+
+Cost reduction through optimized staffing
+
+Objective, data-driven decisions
+
+Slide 5 – Limitations (Demerits)
+Depends on data quality
+
+Forecasts carry probabilistic uncertainty
+
+Requires specialized skills and maintenance
+
+Slide 6 – Key Data Sources
+STR_cleaned.xlsx – employee hours & billing status
+
+CoreAlm_master.xlsx – project tasks & effort logs
+
+Milestone_tracker.xlsx – milestone dates & status
+
+Employee_Whitelist.xlsx – authorized employees
+
+Slide 7 – Analytics Workflow – Overview
+Data preparation & cleaning
+
+Weekly aggregation & median benchmarks
+
+Feature engineering (lags, rolling averages)
+
+Predictive modeling (XGBoost / Gradient Boosting)
+
+Resource forecasting & milestone alignment
+
+Reporting & stakeholder insights
+
+Slide 8 – Data Preparation
+Robust ISO-week parser for consistency
+
+Standardize email / date formats
+
+Classify hours as billable vs non-billable
+
+Slide 9 – Aggregation & Analysis
+Weekly summaries per employee & project
+
+Dynamic median of project-week hours as benchmark
+
+Why median? Robust to outliers
+
+Slide 10 – Feature Engineering & Forecasting
+Lag features: capture temporal dependencies
+
+Rolling averages: smooth fluctuations & reveal trends
+
+Models: XGBoost / Gradient Boosting for structured data
+
+Iteratively minimize error to improve accuracy
+
+Slide 11 – Resource Forecast & Utilization Targets
+Weekly predictions of available hours & shortfalls
+
+Utilization benchmarks highlight over/under allocation
+
+Identify additional resources or task redistribution needs
+
+Slide 12 – Milestone Tracking
+Forecast milestone completion based on resource outlook
+
+Prioritize critical milestones to stay on schedule
+
+Slide 13 – Evaluation Metrics
+MAE – average absolute error
+
+RMSE – penalizes larger errors
+
+R² – proportion of variance explained
+
+MAPE – error as percentage of actuals
+
+Slide 14 – Practical Applications
+Align staffing with upcoming workload peaks
+
+Flag resource shortages early
+
+Support strategic decisions on budgeting & hiring
+
+Enhance on-time milestone delivery
+
+Slide 15 – Conclusion
+Analytics adds foresight to project management
+
+Benefits outweigh challenges when data quality is managed
+
+Framework enables continuous, data-driven improvement
