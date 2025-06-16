@@ -1,0 +1,70 @@
+function generateUpdatedBOMDoc() {
+  const folderId = 'YOUR_FOLDER_ID';  // 🔁 Replace with your actual Drive Folder ID
+  const templateName = 'BOM_Template';  // 🔁 Change to your actual template file name
+  const newDocName = 'Updated_BOM_' + new Date().toISOString().slice(0, 10);
+
+  // Step 1: Copy template file from folder
+  const folder = DriveApp.getFolderById(folderId);
+  const files = folder.getFilesByName(templateName);
+  if (!files.hasNext()) throw new Error("Template not found!");
+  const copiedFile = files.next().makeCopy(newDocName, folder);
+  const doc = DocumentApp.openById(copiedFile.getId());
+  const body = doc.getBody();
+
+  // Step 2: Find the table under heading "2.1 Components to be monitored (BOM)"
+  const searchText = '2.1 Components to be monitored (BOM)';
+  let targetTable = null;
+  const numElements = body.getNumChildren();
+
+  for (let i = 0; i < numElements; i++) {
+    const elem = body.getChild(i);
+    if (elem.getType() === DocumentApp.ElementType.PARAGRAPH) {
+      const text = elem.asParagraph().getText().trim();
+      if (text.includes(searchText)) {
+        // Scan forward to find the next table after the heading
+        for (let j = i + 1; j < numElements; j++) {
+          const nextElem = body.getChild(j);
+          if (nextElem.getType() === DocumentApp.ElementType.TABLE) {
+            targetTable = nextElem.asTable();
+            break;
+          }
+        }
+        break;
+      }
+    }
+  }
+
+  if (!targetTable) throw new Error('Table not found below heading: ' + searchText);
+
+  // Step 3: Clear old rows except header
+  while (targetTable.getNumRows() > 1) {
+    targetTable.removeRow(1);
+  }
+
+  // Step 4: Read spreadsheet data
+  const sheet = SpreadsheetApp.getActiveSpreadsheet();
+  const swSheet = sheet.getSheetByName("Software Bill of Materials");
+  const hwSheet = sheet.getSheetByName("Hardware Bill of Materials");
+  const swData = swSheet.getRange(2, 1, swSheet.getLastRow() - 1, 5).getValues();
+  const hwData = hwSheet.getRange(2, 1, hwSheet.getLastRow() - 1, 5).getValues();
+
+  // Step 5: Combine data into table
+  const maxLen = Math.max(hwData.length, swData.length);
+  for (let i = 0; i < maxLen; i++) {
+    const hw = hwData[i] || ['', '', '', '', ''];
+    const sw = swData[i] || ['', '', '', '', ''];
+
+    const row = targetTable.appendTableRow();
+    row.appendTableCell(hw[0]); // HW Supplier
+    row.appendTableCell(hw[1]); // HW Component Name
+    row.appendTableCell(hw[2]); // Family or Series
+    row.appendTableCell(hw[3]); // Category
+    row.appendTableCell(sw[0]); // OSS or 3rd Party
+    row.appendTableCell(sw[1]); // Supplier Name
+    row.appendTableCell(sw[3]); // Version
+    row.appendTableCell(sw[4]); // License Info
+  }
+
+  doc.saveAndClose();
+  Logger.log("✅ Document created: https://docs.google.com/document/d/" + copiedFile.getId());
+}
