@@ -1,0 +1,84 @@
+// Recursively collects all Google Sheet files in the folder and its subfolders
+function getAllSheetFilesInFolder(folder) {
+  const files = [];
+
+  // Add Google Sheets in this folder
+  const folderFiles = folder.getFilesByType(MimeType.GOOGLE_SHEETS);
+  while (folderFiles.hasNext()) {
+    files.push(folderFiles.next());
+  }
+
+  // Recurse into subfolders
+  const subFolders = folder.getFolders();
+  while (subFolders.hasNext()) {
+    const subfolder = subFolders.next();
+    files.push(...getAllSheetFilesInFolder(subfolder));
+  }
+
+  return files;
+}
+
+function createReferenceTable() {
+  const folderId = 'YOUR_TARGET_FOLDER_ID';  // 🔁 Replace with your actual folder ID
+  const outputSheetName = 'Reference Table';
+
+  const topFolder = DriveApp.getFolderById(folderId);
+  const files = getAllSheetFilesInFolder(topFolder);
+
+  const outputSpreadsheet = SpreadsheetApp.getActiveSpreadsheet();
+  const outputSheet = outputSpreadsheet.getSheetByName(outputSheetName) || outputSpreadsheet.insertSheet(outputSheetName);
+  outputSheet.clear();
+  outputSheet.appendRow([
+    'Cal Level',
+    'Product Line',
+    'Monitoring Cost / Period',
+    'Monitoring + Investigation / Period',
+    'Source File'
+  ]);
+
+  files.forEach(file => {
+    try {
+      const spreadsheet = SpreadsheetApp.openById(file.getId());
+      const summarySheet = spreadsheet.getSheetByName('Summary');
+      const cdoSheet = spreadsheet.getSheetByName('CDO Quotation');
+
+      let sheetToUse = summarySheet || cdoSheet;
+      if (!sheetToUse) {
+        Logger.log(`Skipping ${file.getName()} — No 'Summary' or 'CDO Quotation' sheet found.`);
+        return;
+      }
+
+      const values = sheetToUse.getDataRange().getValues();
+
+      function getValue(label) {
+        for (let i = 0; i < values.length; i++) {
+          if (String(values[i][0]).trim().toLowerCase() === label.toLowerCase()) {
+            return values[i][1];
+          }
+        }
+        return '';
+      }
+
+      const calLevel = getValue('cal level of the product');
+      const productLine = getValue('product line');
+      const monitoringCost = parseFloat(getValue('total monitoring cost')) || 0;
+      const monitoringInvestigation = parseFloat(getValue('total monitoring and investigation cost')) || 0;
+      const maintenancePeriod = parseFloat(getValue('security maintenance period')) || 1;
+
+      const monitoringPerPeriod = monitoringCost / maintenancePeriod;
+      const monitoringInvestigationPerPeriod = monitoringInvestigation / maintenancePeriod;
+
+      outputSheet.appendRow([
+        calLevel,
+        productLine,
+        monitoringPerPeriod,
+        monitoringInvestigationPerPeriod,
+        file.getName()
+      ]);
+    } catch (e) {
+      Logger.log(`Error processing file ${file.getName()}: ${e}`);
+    }
+  });
+
+  Logger.log('✅ Reference table creation complete.');
+}
