@@ -1,0 +1,25 @@
+function copyFilesFromAprilToFolder() {
+  const sourceFolderId = 'SOURCE_FOLDER_ID_HERE';       // Replace with your source folder ID
+  const destinationFolderId = 'DESTINATION_FOLDER_ID_HERE'; // Replace with your destination folder ID
+  const cutoffDate = new Date('2025-04-01T00:00:00Z');       // April 1, 2025
+
+  const sourceFolder = DriveApp.getFolderById(sourceFolderId);
+  const destinationFolder = DriveApp.getFolderById(destinationFolderId);
+
+  const files = sourceFolder.getFiles();
+
+  let copiedCount = 0;
+
+  while (files.hasNext()) {
+    const file = files.next();
+    const lastUpdated = file.getLastUpdated();
+
+    if (lastUpdated >= cutoffDate) {
+      const copiedFile = file.makeCopy(file.getName(), destinationFolder);
+      Logger.log(`Copied: ${file.getName()} | Last Modified: ${lastUpdated}`);
+      copiedCount++;
+    }
+  }
+
+  Logger.log(`Done! Total files copied: ${copiedCount}`);
+}
