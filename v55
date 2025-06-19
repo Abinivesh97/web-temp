@@ -1,0 +1,62 @@
+function createReferenceTable() {
+  const folderId = 'YOUR_TARGET_FOLDER_ID';  // Folder with copied spreadsheets
+  const outputSheetId = 'REFERENCE_SPREADSHEET_ID';  // Reference table spreadsheet ID
+  const outputSheetName = 'Reference Table';
+
+  const folder = DriveApp.getFolderById(folderId);
+  const files = folder.getFilesByType(MimeType.GOOGLE_SHEETS);
+
+  const outputSpreadsheet = SpreadsheetApp.openById(outputSheetId);
+  const outputSheet = outputSpreadsheet.getSheetByName(outputSheetName) || outputSpreadsheet.insertSheet(outputSheetName);
+  outputSheet.clear();  // Optional: clear previous data
+  outputSheet.appendRow(['Cal Level', 'Product Line', 'Monitoring Cost / Period', 'Monitoring + Investigation / Period', 'Source File']);
+
+  while (files.hasNext()) {
+    const file = files.next();
+    const spreadsheet = SpreadsheetApp.openById(file.getId());
+
+    const summarySheet = spreadsheet.getSheetByName('Summary');
+    const cdoSheet = spreadsheet.getSheetByName('CDO Quotation');
+
+    // Decide which sheet to use
+    let sheetToUse = null;
+    if (summarySheet) {
+      sheetToUse = summarySheet;
+    } else if (cdoSheet) {
+      sheetToUse = cdoSheet;
+    } else {
+      Logger.log(`Skipping file ${file.getName()} - No usable sheet found.`);
+      continue;
+    }
+
+    const values = sheetToUse.getDataRange().getValues();
+
+    function getValue(label) {
+      for (let i = 0; i < values.length; i++) {
+        if (String(values[i][0]).trim().toLowerCase() === label.toLowerCase()) {
+          return values[i][1];
+        }
+      }
+      return '';
+    }
+
+    const calLevel = getValue('cal level of the product');
+    const productLine = getValue('product line');
+    const monitoringCost = parseFloat(getValue('total monitoring cost')) || 0;
+    const monitoringInvestigation = parseFloat(getValue('total monitoring and investigation cost')) || 0;
+    const maintenancePeriod = parseFloat(getValue('security maintenance period')) || 1;
+
+    const monitoringPerPeriod = monitoringCost / maintenancePeriod;
+    const monitoringInvestigationPerPeriod = monitoringInvestigation / maintenancePeriod;
+
+    outputSheet.appendRow([
+      calLevel,
+      productLine,
+      monitoringPerPeriod,
+      monitoringInvestigationPerPeriod,
+      file.getName()
+    ]);
+  }
+
+  Logger.log('Reference table created successfully.');
+}
