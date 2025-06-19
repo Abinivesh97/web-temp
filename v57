@@ -1,0 +1,87 @@
+// Recursively get all Google Sheets in a folder and subfolders
+function getAllSheetFiles(folder) {
+  const files = [];
+  const folderFiles = folder.getFilesByType(MimeType.GOOGLE_SHEETS);
+  while (folderFiles.hasNext()) files.push(folderFiles.next());
+
+  const subFolders = folder.getFolders();
+  while (subFolders.hasNext()) {
+    const subfolder = subFolders.next();
+    files.push(...getAllSheetFiles(subfolder));
+  }
+  return files;
+}
+
+// Extract data only from valid templates
+function processTemplatesAndAppend() {
+  const folderId = 'YOUR_FOLDER_ID'; // 🔁 Replace with actual folder ID
+  const outputSpreadsheetId = 'YOUR_OUTPUT_SPREADSHEET_ID'; // 🔁 Replace with destination spreadsheet ID
+  const outputSheetName = 'Consolidated Data';
+
+  const folder = DriveApp.getFolderById(folderId);
+  const files = getAllSheetFiles(folder);
+
+  const outputSpreadsheet = SpreadsheetApp.openById(outputSpreadsheetId);
+  const outputSheet = outputSpreadsheet.getSheetByName(outputSheetName) || outputSpreadsheet.insertSheet(outputSheetName);
+  outputSheet.appendRow(['OEM', 'Division', 'Product Line', 'CAL Level', 'CS Monitoring (€/Yr)', 'CS Monitoring + Investigation (€/Yr)', 'Source File']);
+
+  files.forEach(file => {
+    try {
+      const ss = SpreadsheetApp.openById(file.getId());
+      const sheets = ss.getSheets();
+
+      sheets.forEach(sheet => {
+        const data = sheet.getDataRange().getValues();
+
+        // Detect your specific template by checking key labels
+        const oem = getValueFromCell(data, 'OEM');
+        const division = getValueFromCell(data, 'Division');
+        const productLine = getValueFromCell(data, 'Product Line');
+        const calLevel = getValueFromCell(data, 'CAL Level');
+
+        const csMon = getPlanCost(data, 'CS Monitoring');
+        const csMonInvest = getPlanCost(data, 'CS Monitoring + Investigation');
+
+        // If all required fields exist, it's your template
+        if (oem && productLine && division && calLevel && csMon !== null && csMonInvest !== null) {
+          outputSheet.appendRow([
+            oem,
+            division,
+            productLine,
+            calLevel,
+            csMon,
+            csMonInvest,
+            file.getName()
+          ]);
+        } else {
+          Logger.log(`Skipping non-template: ${file.getName()}`);
+        }
+      });
+    } catch (e) {
+      Logger.log(`Error processing file ${file.getName()}: ${e}`);
+    }
+  });
+}
+
+// Helper to get value next to a specific label (e.g., 'OEM')
+function getValueFromCell(data, label) {
+  label = label.toLowerCase();
+  for (let i = 0; i < data.length; i++) {
+    if (data[i][0] && typeof data[i][0] === 'string' && data[i][0].toLowerCase().includes(label)) {
+      return data[i][1];
+    }
+  }
+  return '';
+}
+
+// Helper to find KE/Year value for a given activity name
+function getPlanCost(data, activityLabel) {
+  activityLabel = activityLabel.toLowerCase();
+  for (let i = 0; i < data.length; i++) {
+    const cell = data[i][1];
+    if (cell && typeof cell === 'string' && cell.toLowerCase().includes(activityLabel)) {
+      return data[i][3] || 0; // Assuming KE/Year is in 4th column (index 3)
+    }
+  }
+  return null;
+}
