@@ -1,0 +1,91 @@
+const TARGET_SHEET_ID = 'YOUR_TARGET_SHEET_ID';  // Your target master sheet ID
+const SW_TAB_NAME = 'Software BOM';              // Target tab for software
+const HW_TAB_NAME = 'Hardware BOM';              // Target tab for hardware
+const SELECTED_COLUMNS = ['col1', 'col2', 'col3', 'col4'];  // Pick any subset if needed
+const BOM_FIELD_NAME = 'Upload BOM Document (.xlsx)';       // Field title from form
+
+function onFormSubmit(e) {
+  const responses = e.namedValues;
+
+  const fileUrlArray = responses[BOM_FIELD_NAME];
+  if (!fileUrlArray || fileUrlArray.length === 0) {
+    Logger.log('❌ No BOM file uploaded.');
+    return;
+  }
+
+  const fileUrl = fileUrlArray[0];
+  const fileId = getFileIdFromUrl(fileUrl);
+  if (!fileId) {
+    Logger.log('❌ Could not extract file ID.');
+    return;
+  }
+
+  const file = DriveApp.getFileById(fileId);
+  const blob = file.getBlob();
+  const parentFolderId = file.getParents().hasNext() ? file.getParents().next().getId() : null;
+
+  const resource = {
+    title: file.getName().replace('.xlsx', ''),
+    mimeType: MimeType.GOOGLE_SHEETS,
+    parents: parentFolderId ? [{ id: parentFolderId }] : []
+  };
+
+  try {
+    const newFile = Drive.Files.insert(resource, blob, { convert: true });
+    Logger.log('✅ Converted file: ' + newFile.title);
+
+    // Process BOM data
+    ingestBOMData(newFile.id);
+
+    // Delete original
+    file.setTrashed(true);
+    Logger.log('🗑️ Original file deleted: ' + file.getName());
+  } catch (err) {
+    Logger.log('❌ Conversion failed: ' + err.message);
+  }
+}
+
+function getFileIdFromUrl(url) {
+  const match = url.match(/[-\w]{25,}/);
+  return match ? match[0] : null;
+}
+
+function ingestBOMData(sheetId) {
+  const source = SpreadsheetApp.openById(sheetId);
+  const swSheet = source.getSheetByName('Software Bill of Materials');
+  const hwSheet = source.getSheetByName('Hardware Bill of Materials');
+
+  const swData = swSheet ? extractSelectedColumns(swSheet, SELECTED_COLUMNS) : [];
+  const hwData = hwSheet ? extractSelectedColumns(hwSheet, SELECTED_COLUMNS) : [];
+
+  const target = SpreadsheetApp.openById(TARGET_SHEET_ID);
+  const swTarget = target.getSheetByName(SW_TAB_NAME);
+  const hwTarget = target.getSheetByName(HW_TAB_NAME);
+
+  if (swTarget && swData.length > 0) appendUniqueRows(swTarget, swData);
+  if (hwTarget && hwData.length > 0) appendUniqueRows(hwTarget, hwData);
+}
+
+function extractSelectedColumns(sheet, selectedHeaders) {
+  const data = sheet.getDataRange().getValues();
+  if (data.length < 2) return [];
+
+  const headers = data[0];
+  const selectedIndices = selectedHeaders.map(h => headers.indexOf(h)).filter(i => i !== -1);
+
+  if (selectedIndices.length === 0) return [];
+
+  return data.slice(1).map(row => selectedIndices.map(i => row[i]));
+}
+
+function appendUniqueRows(targetSheet, newData) {
+  const existing = targetSheet.getDataRange().getValues().map(row => row.join('|'));
+  const filtered = newData.filter(row => !existing.includes(row.join('|')));
+
+  if (filtered.length > 0) {
+    targetSheet.getRange(targetSheet.getLastRow() + 1, 1, filtered.length, filtered[0].length).setValues(filtered);
+    Logger.log(`✅ Appended ${filtered.length} new rows`);
+  } else {
+    Logger.log('⚠️ No new data to append.');
+  }
+}
