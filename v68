@@ -1,0 +1,115 @@
+/**
+ * Triggered on form submission. Converts uploaded XLSX to Google Sheets and processes BOM data.
+ */
+function handleNewFormUpload() {
+  const folderId = 'YOUR_FOLDER_ID_HERE'; // 📂 Folder where form uploads go
+  const folder = DriveApp.getFolderById(folderId);
+  const files = folder.getFilesByType(MimeType.MICROSOFT_EXCEL);
+
+  while (files.hasNext()) {
+    const file = files.next();
+    const blob = file.getBlob();
+    const fileName = file.getName().replace('.xlsx', '');
+
+    try {
+      const newSheet = Drive.Files.insert({
+        title: fileName,
+        mimeType: MimeType.GOOGLE_SHEETS,
+        parents: [{ id: folderId }]
+      }, blob, { convert: true });
+
+      Logger.log('✅ Converted: https://docs.google.com/spreadsheets/d/' + newSheet.id);
+      file.setTrashed(true);
+      processBOMSpreadsheet(newSheet.id);
+    } catch (e) {
+      Logger.log('❌ Error: ' + e.message);
+    }
+  }
+}
+
+/**
+ * Triggered on edit of any BOM Google Sheet to sync updates with master and supplier sheets.
+ */
+function trackBOMUpdates(e) {
+  const editedSheet = e.source;
+  const editedSheetId = editedSheet.getId();
+  processBOMSpreadsheet(editedSheetId);
+}
+
+/**
+ * Main processing logic for BOM sheets (used by both triggers).
+ */
+function processBOMSpreadsheet(fileId) {
+  const ss = SpreadsheetApp.openById(fileId);
+  const sheets = ss.getSheets();
+  const masterSheet = SpreadsheetApp.openById('YOUR_MASTER_SHEET_ID_HERE');
+
+  const hwSheet = ss.getSheetByName('Hardware BOM');
+  const swSheet = ss.getSheetByName('Software BOM');
+
+  if (hwSheet) processSection(hwSheet, masterSheet, 'HW BOM Master', 'HW Supplier Name', ['Part Number', 'Description', 'HW Supplier Name', 'Qty']);
+  if (swSheet) processSection(swSheet, masterSheet, 'SW BOM Master', 'SW Supplier Name', ['Component Name', 'Version', 'SW Supplier Name', 'License']);
+}
+
+function processSection(sourceSheet, masterSheet, masterTabName, supplierColName, colNames) {
+  const data = sourceSheet.getDataRange().getValues();
+  const headers = data[0];
+  const rows = data.slice(1);
+
+  const colIndexes = colNames.map(col => headers.indexOf(col));
+  const supplierColIndex = headers.indexOf(supplierColName);
+
+  const masterTab = getOrCreateSheet(masterSheet, masterTabName);
+  const existingMaster = getSheetData(masterTab);
+
+  rows.forEach(row => {
+    const supplierRaw = row[supplierColIndex];
+    const supplier = normalizeSupplier(supplierRaw);
+    if (!supplier) return;
+
+    const rowData = colIndexes.map(i => row[i]);
+
+    // Append to supplier sheet
+    const supplierSheet = getOrCreateSheet(masterSheet, supplier);
+    if (!rowExists(getSheetData(supplierSheet), rowData)) {
+      supplierSheet.appendRow(rowData);
+    }
+
+    // Append to master sheet
+    if (!rowExists(existingMaster, rowData)) {
+      masterTab.appendRow(rowData);
+    }
+  });
+}
+
+function normalizeSupplier(supplier) {
+  if (!supplier) return null;
+  supplier = supplier.toString().toLowerCase().trim();
+  if (supplier === 'ti') return 'Texas Instruments';
+  return supplier.charAt(0).toUpperCase() + supplier.slice(1);
+}
+
+function getOrCreateSheet(ss, name) {
+  const sheet = ss.getSheetByName(name);
+  return sheet || ss.insertSheet(name);
+}
+
+function getSheetData(sheet) {
+  const range = sheet.getDataRange();
+  const values = range.getValues();
+  return values.slice(1); // skip header
+}
+
+function rowExists(data, row) {
+  return data.some(r => JSON.stringify(r) === JSON.stringify(row));
+}
+
+/**
+ * 📌 One-time setup:
+ * 1. Replace 'YOUR_FOLDER_ID_HERE' with your upload folder ID
+ * 2. Replace 'YOUR_MASTER_SHEET_ID_HERE' with your central spreadsheet ID
+ * 3. Create sheets inside master: 'HW BOM Master', 'SW BOM Master'
+ * 4. Set installable triggers:
+ *    - `handleNewFormUpload` → on form submit
+ *    - `trackBOMUpdates` → on edit
+ */
