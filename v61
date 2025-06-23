@@ -1,0 +1,28 @@
+function convertXLSXToGoogleSheet() {
+  const folderId = '11eAXq9cyKDczA6HRYYjO85H7W_kTqUsB'; // Your folder ID
+  const folder = DriveApp.getFolderById(folderId);
+  const files = folder.getFilesByType(MimeType.MICROSOFT_EXCEL);
+
+  while (files.hasNext()) {
+    const file = files.next();
+    const blob = file.getBlob();
+
+    const resource = {
+      title: file.getName().replace('.xlsx', ''),
+      mimeType: MimeType.GOOGLE_SHEETS,
+      parents: [{ id: folderId }] // Keep converted file in the same folder
+    };
+
+    try {
+      const newFile = Drive.Files.insert(resource, blob, { convert: true });
+      Logger.log('✅ Converted: https://docs.google.com/spreadsheets/d/' + newFile.id);
+
+      // ✅ Delete the original XLSX file after successful conversion
+      file.setTrashed(true); // or file.setTrashed(false) to recover later
+      Logger.log('🗑️ Deleted original file: ' + file.getName());
+
+    } catch (e) {
+      Logger.log('❌ Error converting file: ' + file.getName() + ' - ' + e.message);
+    }
+  }
+}
