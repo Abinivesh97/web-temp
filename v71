@@ -1,0 +1,167 @@
+/**** CONFIGURATION ****/
+const TARGET_SHEET_ID = 'YOUR_TARGET_SHEET_ID';
+const SECONDARY_SHEET_ID = 'YOUR_SECONDARY_SHEET_ID';
+const BOM_FIELD_NAME = 'Upload BOM Document (.xlsx)';
+
+const SELECTED_COLUMNS_HW = ['col1', 'col2', 'col3', 'col4'];
+const SELECTED_COLUMNS_SW = ['col1', 'col3', 'col6'];
+const SECONDARY_SYNC_COLUMNS = ['col1', 'col3'];  // user-defined columns to sync uniquely
+
+const HW_SUPPLIER_COL = 'HW Supplier Name';
+const SW_SUPPLIER_COL = 'SW Supplier Name';
+
+const SUPPLIER_ALIASES = {
+  'TI': 'Texas Instruments',
+  'T.I.': 'Texas Instruments',
+  'Texas Instruments': 'Texas Instruments',
+  'BMW Group': 'BMW',
+  'bmw': 'BMW',
+  'BMW': 'BMW'
+};
+
+function onFormSubmit(e) {
+  const responses = e.namedValues;
+  const fileUrlArray = responses[BOM_FIELD_NAME];
+  if (!fileUrlArray || fileUrlArray.length === 0) return;
+  const fileId = getFileIdFromUrl(fileUrlArray[0]);
+  if (!fileId) return;
+
+  const file = DriveApp.getFileById(fileId);
+  const blob = file.getBlob();
+  const parentFolderId = file.getParents().hasNext() ? file.getParents().next().getId() : null;
+
+  const resource = {
+    title: file.getName().replace('.xlsx', ''),
+    mimeType: MimeType.GOOGLE_SHEETS,
+    parents: parentFolderId ? [{ id: parentFolderId }] : []
+  };
+
+  try {
+    const newFile = Drive.Files.insert(resource, blob, { convert: true });
+    processBOM(newFile.id);
+    file.setTrashed(true);
+  } catch (err) {
+    Logger.log('❌ Conversion failed: ' + err.message);
+  }
+}
+
+function getFileIdFromUrl(url) {
+  const match = url.match(/[-\w]{25,}/);
+  return match ? match[0] : null;
+}
+
+function processBOM(fileId) {
+  const ss = SpreadsheetApp.openById(fileId);
+  const hwSheet = ss.getSheetByName('Hardware Bill of Materials');
+  const swSheet = ss.getSheetByName('Software Bill of Materials');
+  const target = SpreadsheetApp.openById(TARGET_SHEET_ID);
+
+  if (hwSheet) {
+    processAndSync(hwSheet, 'Overall HW BOM', HW_SUPPLIER_COL, SELECTED_COLUMNS_HW);
+  }
+  if (swSheet) {
+    processAndSync(swSheet, 'Overall SW BOM', SW_SUPPLIER_COL, SELECTED_COLUMNS_SW);
+  }
+}
+
+function processAndSync(sourceSheet, masterSheetName, supplierColName, selectedColumns) {
+  const target = SpreadsheetApp.openById(TARGET_SHEET_ID);
+  const secondary = SpreadsheetApp.openById(SECONDARY_SHEET_ID);
+
+  appendToOverall(target, sourceSheet, masterSheetName, selectedColumns);
+  const data = sourceSheet.getDataRange().getValues();
+  if (data.length < 2) return;
+
+  const headers = data[0];
+  const supplierIdx = headers.indexOf(supplierColName);
+  const colIndexes = selectedColumns.map(h => headers.indexOf(h)).filter(i => i !== -1);
+
+  for (let i = 1; i < data.length; i++) {
+    const row = data[i];
+    const supplierRaw = row[supplierIdx]?.toString().trim();
+    const supplierNorm = normalizeSupplier(supplierRaw);
+    const selectedData = colIndexes.map(idx => row[idx]);
+
+    const suppSheet = getOrCreateSheet(target, supplierNorm, selectedColumns);
+    appendUniqueRows(suppSheet, [selectedData]);
+
+    syncToSecondarySheet(secondary, supplierNorm, headers, row);
+  }
+}
+
+function appendToOverall(workbook, sourceSheet, overallSheetName, selectedColumns) {
+  const data = sourceSheet.getDataRange().getValues();
+  const headers = data[0];
+  const colIndexes = selectedColumns.map(h => headers.indexOf(h)).filter(i => i !== -1);
+  const rows = data.slice(1).map(row => colIndexes.map(idx => row[idx]));
+
+  let sheet = workbook.getSheetByName(overallSheetName);
+  if (!sheet) {
+    sheet = workbook.insertSheet(overallSheetName);
+    sheet.getRange(1, 1, 1, selectedColumns.length).setValues([selectedColumns]);
+  }
+  const existing = sheet.getDataRange().getValues().map(r => r.join('|'));
+  const newRows = rows.filter(r => !existing.includes(r.join('|')));
+
+  if (newRows.length > 0) {
+    sheet.getRange(sheet.getLastRow() + 1, 1, newRows.length, newRows[0].length).setValues(newRows);
+  }
+}
+
+function normalizeSupplier(name) {
+  const norm = name.trim().toLowerCase();
+  return SUPPLIER_ALIASES[name] || SUPPLIER_ALIASES[norm] || name;
+}
+
+function getOrCreateSheet(workbook, name, headers) {
+  let sheet = workbook.getSheetByName(name);
+  if (!sheet) {
+    sheet = workbook.insertSheet(name);
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  }
+  return sheet;
+}
+
+function appendUniqueRows(sheet, rows) {
+  const existing = sheet.getDataRange().getValues().map(r => r.join('|'));
+  const newRows = rows.filter(r => !existing.includes(r.join('|')));
+  if (newRows.length > 0) {
+    sheet.getRange(sheet.getLastRow() + 1, 1, newRows.length, newRows[0].length).setValues(newRows);
+  }
+}
+
+function syncToSecondarySheet(workbook, supplier, headers, row) {
+  const targetCols = SECONDARY_SYNC_COLUMNS.map(c => headers.indexOf(c)).filter(i => i !== -1);
+  const data = targetCols.map(i => row[i]);
+  if (data.length === 0) return;
+
+  const sheetName1 = `${supplier} - Project Info`;
+  const sheetName2 = `Project Info - ${supplier}`;
+
+  let sheet = workbook.getSheetByName(sheetName1) || workbook.getSheetByName(sheetName2);
+  if (!sheet) {
+    sheet = workbook.insertSheet(sheetName1);
+    sheet.getRange(1, 1, 1, SECONDARY_SYNC_COLUMNS.length).setValues([SECONDARY_SYNC_COLUMNS]);
+  }
+
+  const existing = sheet.getDataRange().getValues().map(r => r.join('|'));
+  if (!existing.includes(data.join('|')) && data.join('')) {
+    sheet.getRange(sheet.getLastRow() + 1, 1, 1, data.length).setValues([data]);
+  }
+}
+
+function onEdit(e) {
+  const sheet = e.source.getActiveSheet();
+  const sheetName = sheet.getName();
+  if (!['Overall HW BOM', 'Overall SW BOM'].includes(sheetName)) return;
+
+  const row = sheet.getRange(e.range.getRow(), 1, 1, sheet.getLastColumn()).getValues()[0];
+  const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+
+  const supplierHeader = sheetName === 'Overall HW BOM' ? HW_SUPPLIER_COL : SW_SUPPLIER_COL;
+  const supplierIndex = headers.indexOf(supplierHeader);
+  const supplierRaw = row[supplierIndex];
+  const supplierNorm = normalizeSupplier(supplierRaw);
+
+  syncToSecondarySheet(SpreadsheetApp.openById(SECONDARY_SHEET_ID), supplierNorm, headers, row);
+}
