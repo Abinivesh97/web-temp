@@ -1,0 +1,120 @@
+const TARGET_SHEET_ID = 'YOUR_MASTER_SHEET_ID';
+const SECONDARY_SHEET_ID = 'YOUR_UNIQUE_VALUES_SHEET_ID';
+const SECONDARY_COLUMNS = ['col1','col3'];
+
+const SELECTED_COLUMNS_HW = ['col1','col2','col3','col4'];
+const SELECTED_COLUMNS_SW = ['col1','col3','col6'];
+const BOM_FIELD_NAME = 'Upload BOM Document (.xlsx)';
+const SUPPLIER_ALIASES = {'TI':'Texas Instruments','BMW':'BMW'};
+
+function normalizeSupplier(name) {
+  return SUPPLIER_ALIASES[name.trim()] || name.trim();
+}
+
+function getFileIdFromUrl(url) {
+  const match = url.match(/[-\w]{25,}/);
+  return match?match[0]:null;
+}
+
+function onFormSubmit(e) {
+  const fileUrl = e.namedValues[BOM_FIELD_NAME]?.[0];
+  const fileId = getFileIdFromUrl(fileUrl);
+  if (!fileId) return;
+
+  const file = DriveApp.getFileById(fileId);
+  const blob = file.getBlob();
+  const newFile = Drive.Files.insert({
+    title: file.getName().replace('.xlsx',''),
+    mimeType: MimeType.GOOGLE_SHEETS,
+  }, blob, {convert:true});
+  file.setTrashed(true);
+  processBOM(newFile.id);
+}
+
+function processBOM(fileId) {
+  const ss = SpreadsheetApp.openById(fileId);
+  ['Hardware Bill of Materials', 'Software Bill of Materials'].forEach(type => {
+    const sheet = ss.getSheetByName(type);
+    if (!sheet) return;
+
+    const isHW = type.startsWith('Hardware');
+    const selectedCols = isHW ? SELECTED_COLUMNS_HW : SELECTED_COLUMNS_SW;
+    const overallName = isHW ? 'Overall HW BOM' : 'Overall SW BOM';
+    const supCol = isHW ? selectedCols[2] : selectedCols[2]; // supplier is 3rd in both
+    syncSheet(sheet, overallName, supCol, selectedCols, fileId, type);
+  });
+}
+
+function syncSheet(sourceSheet, overallName, supplierCol, selCols, fileId, sourceTab) {
+  const data = sourceSheet.getDataRange().getValues();
+  if (data.length<2) return;
+
+  const headers = data[0];
+  const idxMap = {}; headers.forEach((h,i)=>idxMap[h]=i);
+
+  const toMaster = [];
+  const toSup = {};
+
+  for (let i=1; i<data.length; i++) {
+    const row = data[i];
+    const selected = selCols.map(c=>row[idxMap[c]]||'');
+    selected.push(fileId, sourceTab, i+1); // track origin
+
+    const supplier = normalizeSupplier(row[idxMap[supplierCol]]||'');
+    if (!supplier) continue;
+
+    toMaster.push(selected);
+    toSup[supplier] = toSup[supplier]||[];
+    toSup[supplier].push(selected);
+  }
+
+  appendUniqueRows(TARGET_SHEET_ID, overallName, selCols, toMaster);
+  for (const sup in toSup) {
+    appendUniqueRows(TARGET_SHEET_ID, sup, selCols, [], toSup[sup]);
+  }
+}
+
+function appendUniqueRows(ssId, sheetName, selCols, extraCols=[], rows=[]) {
+  const ss = SpreadsheetApp.openById(ssId);
+  let sh = ss.getSheetByName(sheetName);
+  if (!sh) {
+    sh = ss.insertSheet(sheetName);
+    sh.appendRow([...selCols, 'sourceFile','sourceTab','sourceRow']);
+  }
+
+  const existing = sh.getDataRange().getValues().map(r=>r.join('|'));
+  const newRows = rows.map(r=>[...r, ...[]]).filter(r=>!existing.includes(r.join('|')));
+  if (newRows.length) sh.getRange(sh.getLastRow()+1,1,newRows.length,newRows[0].length).setValues(newRows);
+}
+
+function onMasterEdit(e) {
+  const sh = e.source.getActiveSheet();
+  if (!['Overall HW BOM','Overall SW BOM'].includes(sh.getName())) return;
+
+  const headers = sh.getRange(1,1,1,sh.getLastColumn()).getValues()[0];
+  const idx = {}; headers.forEach((h,i)=>idx[h]=i);
+
+  const rowNum = e.range.getRow();
+  if (rowNum===1) return;
+
+  const row = sh.getRange(rowNum,1,1,sh.getLastColumn()).getValues()[0];
+  const fileId = row[idx['sourceFile']];
+  const sourceTab = row[idx['sourceTab']];
+  const sourceRow = row[idx['sourceRow']];
+  if (!fileId||!sourceTab||!sourceRow) return;
+
+  // Update original BOM
+  const src = SpreadsheetApp.openById(fileId);
+  const srcSheet = src.getSheetByName(sourceTab);
+  const targetRow = idx; // reuse mapping
+  const updateVals = headers.slice(0, selCols.length).map(h=>row[idx[h]]);
+  srcSheet.getRange(sourceRow,1,1,updateVals.length).setValues([updateVals]);
+
+  // Update secondary uniques
+  const sec = SpreadsheetApp.openById(SECONDARY_SHEET_ID).getSheetByName('Unique Values') ||
+              SpreadsheetApp.openById(SECONDARY_SHEET_ID).insertSheet('Unique Values');
+  const values = SECONDARY_COLUMNS.map(c=>row[idx[c]]);
+  const existVals = sec.getRange(1,1,sec.getLastRow(),values.length).getValues()
+                       .map(r=>r.join('|'));
+  if (!existVals.includes(values.join('|'))) sec.appendRow(values);
+}
