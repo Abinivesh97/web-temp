@@ -1,0 +1,77 @@
+// === CONFIGURATION ===
+const HW_COLUMNS = ['Part Number', 'Description', 'HW Supplier Name', 'Qty'];
+const SW_COLUMNS = ['Component Name', 'Version', 'SW Supplier Name', 'License'];
+
+const MASTER_HW_SHEET = 'Overall HW BOM';
+const MASTER_SW_SHEET = 'Overall SW BOM';
+const TARGET_SPREADSHEET_ID = 'PASTE_YOUR_TARGET_SPREADSHEET_ID_HERE';
+
+// === SUPPLIER NORMALIZATION ===
+function normalizeSupplier(name) {
+  const map = {
+    'TI': 'Texas Instruments',
+    'T.I.': 'Texas Instruments',
+    'Texas Instruments': 'Texas Instruments',
+    'BMW': 'BMW',
+    'B.M.W.': 'BMW'
+  };
+  if (!name) return 'Unknown';
+  const key = name.trim().toUpperCase();
+  return map[key] || name.trim();
+}
+
+// === ROW SELECTION UTILITIES ===
+function getSelectedColumns(headerRow, fullRow, desiredCols) {
+  return desiredCols.map(colName => {
+    const index = headerRow.indexOf(colName);
+    return index !== -1 ? fullRow[index] : '';
+  });
+}
+
+function rowExists(sheet, rowData) {
+  const allRows = sheet.getDataRange().getValues();
+  const rowString = rowData.join('|');
+  return allRows.some(r => r.join('|') === rowString);
+}
+
+// === MAIN TRACKER FUNCTION ===
+function trackBOMUpdates(e) {
+  const editedSheet = e.source.getActiveSheet();
+  const editedSheetName = editedSheet.getName();
+  const spreadsheet = e.source;
+
+  // Only track in actual BOM sheets
+  if (editedSheetName !== 'Hardware BOM' && editedSheetName !== 'Software BOM') return;
+
+  const isHW = editedSheetName === 'Hardware BOM';
+  const colNames = isHW ? HW_COLUMNS : SW_COLUMNS;
+  const masterSheetName = isHW ? MASTER_HW_SHEET : MASTER_SW_SHEET;
+
+  const header = editedSheet.getRange(1, 1, 1, editedSheet.getLastColumn()).getValues()[0];
+  const editedRow = editedSheet.getRange(e.range.getRow(), 1, 1, editedSheet.getLastColumn()).getValues()[0];
+  const selectedData = getSelectedColumns(header, editedRow, colNames);
+
+  if (selectedData.every(v => v === '')) return; // Skip empty edits
+
+  const supplier = normalizeSupplier(selectedData[2]);
+
+  const targetSS = SpreadsheetApp.openById(TARGET_SPREADSHEET_ID);
+
+  // === MASTER SHEET ===
+  let masterSheet = targetSS.getSheetByName(masterSheetName);
+  if (!masterSheet) masterSheet = targetSS.insertSheet(masterSheetName);
+
+  if (!rowExists(masterSheet, selectedData)) {
+    masterSheet.appendRow(selectedData);
+    Logger.log(`✅ Appended to master: ${masterSheetName}`);
+  }
+
+  // === SUPPLIER SHEET ===
+  let supplierSheet = targetSS.getSheetByName(supplier);
+  if (!supplierSheet) supplierSheet = targetSS.insertSheet(supplier);
+
+  if (!rowExists(supplierSheet, selectedData)) {
+    supplierSheet.appendRow(selectedData);
+    Logger.log(`✅ Appended to supplier sheet: ${supplier}`);
+  }
+}
