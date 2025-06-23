@@ -1,0 +1,117 @@
+const TARGET_SHEET_ID = 'YOUR_TARGET_SHEET_ID';  // Replace with actual sheet ID
+const BOM_FIELD_NAME = 'Upload BOM Document (.xlsx)';  // Replace with form field name
+
+const SELECTED_COLUMNS_HW = ['col1', 'col2', 'col3', 'col4'];
+const SELECTED_COLUMNS_SW = ['col1', 'col3', 'col6'];
+
+const SUPPLIER_ALIASES = {
+  'TI': 'Texas Instruments',
+  'T.I.': 'Texas Instruments',
+  'Texas Instruments': 'Texas Instruments',
+  'BMW Group': 'BMW',
+  'bmw': 'BMW',
+  'BMW': 'BMW'
+};
+
+const HW_SUPPLIER_COL = 'HW Supplier Name';
+const SW_SUPPLIER_COL = 'SW Supplier Name';
+
+function onFormSubmit(e) {
+  const responses = e.namedValues;
+  const fileUrlArray = responses[BOM_FIELD_NAME];
+  if (!fileUrlArray || fileUrlArray.length === 0) return;
+
+  const fileId = getFileIdFromUrl(fileUrlArray[0]);
+  if (!fileId) return;
+
+  const file = DriveApp.getFileById(fileId);
+  const blob = file.getBlob();
+  const parentFolderId = file.getParents().hasNext() ? file.getParents().next().getId() : null;
+
+  const resource = {
+    title: file.getName().replace('.xlsx', ''),
+    mimeType: MimeType.GOOGLE_SHEETS,
+    parents: parentFolderId ? [{ id: parentFolderId }] : []
+  };
+
+  try {
+    const newFile = Drive.Files.insert(resource, blob, { convert: true });
+    Logger.log('✅ Converted file: ' + newFile.title);
+    processBOM(newFile.id);
+    file.setTrashed(true);
+  } catch (err) {
+    Logger.log('❌ Conversion failed: ' + err.message);
+  }
+}
+
+function getFileIdFromUrl(url) {
+  const match = url.match(/[-\w]{25,}/);
+  return match ? match[0] : null;
+}
+
+function processBOM(fileId) {
+  const ss = SpreadsheetApp.openById(fileId);
+  const hwSheet = ss.getSheetByName('Hardware Bill of Materials');
+  const swSheet = ss.getSheetByName('Software Bill of Materials');
+
+  if (hwSheet) processSheetPerSupplier(hwSheet, HW_SUPPLIER_COL, SELECTED_COLUMNS_HW);
+  if (swSheet) processSheetPerSupplier(swSheet, SW_SUPPLIER_COL, SELECTED_COLUMNS_SW);
+}
+
+function processSheetPerSupplier(sheet, supplierHeader, selectedColumns) {
+  const data = sheet.getDataRange().getValues();
+  if (data.length < 2) return;
+
+  const headers = data[0];
+  const supplierIndex = headers.indexOf(supplierHeader);
+  const colIndexes = selectedColumns.map(h => headers.indexOf(h)).filter(i => i !== -1);
+
+  if (supplierIndex === -1 || colIndexes.length === 0) return;
+
+  const rowsBySupplier = {};
+
+  for (let i = 1; i < data.length; i++) {
+    const row = data[i];
+    const supplierRaw = row[supplierIndex]?.toString().trim();
+    if (!supplierRaw) continue;
+
+    const supplierNorm = normalizeSupplier(supplierRaw);
+    const selectedData = colIndexes.map(idx => row[idx]);
+
+    if (!rowsBySupplier[supplierNorm]) rowsBySupplier[supplierNorm] = [];
+    rowsBySupplier[supplierNorm].push(selectedData);
+  }
+
+  const target = SpreadsheetApp.openById(TARGET_SHEET_ID);
+  for (const supplier in rowsBySupplier) {
+    const values = rowsBySupplier[supplier];
+    const sheet = getOrCreateSheet(target, supplier, selectedColumns);
+    appendUniqueRows(sheet, values);
+  }
+}
+
+function normalizeSupplier(name) {
+  const norm = name.trim().toLowerCase();
+  return SUPPLIER_ALIASES[name] || SUPPLIER_ALIASES[norm] || name;
+}
+
+function getOrCreateSheet(workbook, name, headers) {
+  let sheet = workbook.getSheetByName(name);
+  if (!sheet) {
+    sheet = workbook.insertSheet(name);
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  }
+  return sheet;
+}
+
+function appendUniqueRows(sheet, rows) {
+  const existing = sheet.getDataRange().getValues().map(row => row.join('|'));
+  const newRows = rows.filter(row => !existing.includes(row.join('|')));
+
+  if (newRows.length > 0) {
+    sheet.getRange(sheet.getLastRow() + 1, 1, newRows.length, newRows[0].length).setValues(newRows);
+    Logger.log(`✅ Appended ${newRows.length} rows to "${sheet.getName()}"`);
+  } else {
+    Logger.log(`ℹ️ No new rows for "${sheet.getName()}"`);
+  }
+}
