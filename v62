@@ -1,0 +1,88 @@
+const TARGET_SHEET_ID = 'YOUR_MASTER_SHEET_ID';
+const SW_TAB_NAME = 'Software BOM';
+const HW_TAB_NAME = 'Hardware BOM';
+const SELECTED_COLUMNS = ['col1', 'col2', 'col3', 'col4'];
+const BOM_FIELD_NAME = 'Upload BOM Document (.xlsx)';  // Replace with your exact field title
+
+function onFormSubmit(e) {
+  const responses = e.namedValues;
+
+  // ✅ Get file URL from the BOM field
+  const fileUrlArray = responses[BOM_FIELD_NAME];
+  if (!fileUrlArray || fileUrlArray.length === 0) {
+    Logger.log('❌ No BOM document uploaded.');
+    return;
+  }
+
+  const fileUrl = fileUrlArray[0];
+  const fileId = getFileIdFromUrl(fileUrl);
+  if (!fileId) {
+    Logger.log('❌ Invalid file URL.');
+    return;
+  }
+
+  const file = DriveApp.getFileById(fileId);
+  const blob = file.getBlob();
+
+  const resource = {
+    title: file.getName().replace('.xlsx', ''),
+    mimeType: MimeType.GOOGLE_SHEETS,
+    parents: [ { id: file.getParents().next().getId() } ]
+  };
+
+  try {
+    const newFile = Drive.Files.insert(resource, blob, { convert: true });
+    Logger.log('✅ Converted: ' + newFile.getName());
+
+    ingestBOMData(newFile.id); // Ingest BOM columns
+    file.setTrashed(true);     // Delete original
+  } catch (e) {
+    Logger.log('❌ Failed to convert: ' + e.message);
+  }
+}
+
+function getFileIdFromUrl(url) {
+  const match = url.match(/[-\w]{25,}/);
+  return match ? match[0] : null;
+}
+
+function ingestBOMData(sheetId) {
+  const source = SpreadsheetApp.openById(sheetId);
+  const swSheet = source.getSheetByName('Software Bill of Materials');
+  const hwSheet = source.getSheetByName('Hardware Bill of Materials');
+
+  const swData = extractSelectedColumns(swSheet, SELECTED_COLUMNS);
+  const hwData = extractSelectedColumns(hwSheet, SELECTED_COLUMNS);
+
+  const target = SpreadsheetApp.openById(TARGET_SHEET_ID);
+  const swTarget = target.getSheetByName(SW_TAB_NAME);
+  const hwTarget = target.getSheetByName(HW_TAB_NAME);
+
+  appendUniqueRows(swTarget, swData);
+  appendUniqueRows(hwTarget, hwData);
+}
+
+function extractSelectedColumns(sheet, selectedHeaders) {
+  const data = sheet.getDataRange().getValues();
+  if (data.length < 2) return [];
+
+  const headers = data[0];
+  const selectedIndices = selectedHeaders.map(h => headers.indexOf(h)).filter(i => i !== -1);
+  if (selectedIndices.length === 0) return [];
+
+  return data.slice(1).map(row => selectedIndices.map(i => row[i]));
+}
+
+function appendUniqueRows(targetSheet, newData) {
+  if (newData.length === 0) return;
+
+  const existing = targetSheet.getDataRange().getValues().map(row => row.join('|'));
+  const filtered = newData.filter(row => !existing.includes(row.join('|')));
+
+  if (filtered.length > 0) {
+    targetSheet.getRange(targetSheet.getLastRow() + 1, 1, filtered.length, filtered[0].length).setValues(filtered);
+    Logger.log(`✅ Appended ${filtered.length} new rows`);
+  } else {
+    Logger.log('⚠️ No new rows to append');
+  }
+}
