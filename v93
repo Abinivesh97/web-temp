@@ -1,0 +1,13 @@
+function getMappedRow(formData, componentName) {
+  const mapOrder = [
+    'STR code', 'Project Name', 'Product', 'Current Project Milestone',
+    'OEM', 'BG', 'Sop Date', 'Cybersecurity Manager (CSM)',
+    'Cybersecurity Cheif Security Officer (CSO)', 'Project Point of Contact', 'Before Comments'
+  ];
+  
+  const row = [componentName];
+  for (const key of mapOrder) {
+    row.push(formData[key]?.[0] || '');
+  }
+  return row;
+}
