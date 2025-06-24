@@ -1,0 +1,233 @@
+const TARGET_SHEET_ID = '1L1cP9acyTPe3dKp_k_E8h_xQS9a33K8SEQOkVG_hilY';
+const BOM_FIELD_NAME = 'BOM';
+
+const SELECTED_COLUMNS_HW = ['HW Supplier', 'HW Component Name', 'Family or Series', 'Category'];
+const SELECTED_COLUMNS_SW = ['SW Supplier Name', 'SW Component Name\n(CBD/Chipset ID etc)', 'Version', 'OSS or 3rd Party'];
+
+const SUPPLIER_ALIASES = {
+  'TI': 'Texas Instruments',
+  'T.I.': 'Texas Instruments',
+  'Texas Instruments': 'Texas Instruments',
+  'BMW Group': 'BMW',
+  'bmw': 'BMW',
+  'BMW': 'BMW'
+};
+
+const HW_SUPPLIER_COL = 'HW Supplier Name';
+const SW_SUPPLIER_COL = 'SW Supplier Name';
+
+const SECONDARY_SHEET_ID = '1lPWBhFqRv8QbD2PUDM6d8QgeRSXzG4ggk17i-64GH0g';
+
+function onFormSubmit(e) {
+  const responses = e.namedValues;
+  const fileUrlArray = responses[BOM_FIELD_NAME];
+  if (!fileUrlArray || fileUrlArray.length === 0) return;
+
+  const fileId = getFileIdFromUrl(fileUrlArray[0]);
+  if (!fileId) return;
+
+  const file = DriveApp.getFileById(fileId);
+  const blob = file.getBlob();
+  const parentFolderId = file.getParents().hasNext() ? file.getParents().next().getId() : null;
+
+  const resource = {
+    title: file.getName().replace('.xlsx', ''),
+    mimeType: MimeType.GOOGLE_SHEETS,
+    parents: parentFolderId ? [{ id: parentFolderId }] : []
+  };
+
+  try {
+    const newFile = Drive.Files.insert(resource, blob, { convert: true });
+    Logger.log('✅ Converted file: ' + newFile.title);
+    processBOM(newFile.id);
+    file.setTrashed(true);
+  } catch (err) {
+    Logger.log('❌ Conversion failed: ' + err.message);
+  }
+}
+
+function getFileIdFromUrl(url) {
+  const match = url.match(/[-\w]{25,}/);
+  return match ? match[0] : null;
+}
+
+function processBOM(fileId) {
+  const ss = SpreadsheetApp.openById(fileId);
+  const hwSheet = ss.getSheetByName('Hardware Bill of Materials');
+  const swSheet = ss.getSheetByName('Software Bill of Materials');
+  const target = SpreadsheetApp.openById(TARGET_SHEET_ID);
+  const secondary = SpreadsheetApp.openById(SECONDARY_SHEET_ID);
+
+  if (hwSheet) {
+    appendToOverall(target, hwSheet, 'HardwareBOM', SELECTED_COLUMNS_HW);
+    processSheetPerSupplier(secondary, hwSheet, HW_SUPPLIER_COL, SELECTED_COLUMNS_HW);
+  }
+
+  if (swSheet) {
+    appendToOverall(target, swSheet, 'SoftwareBOM', SELECTED_COLUMNS_SW);
+    processSheetPerSupplier(secondary, swSheet, SW_SUPPLIER_COL, SELECTED_COLUMNS_SW);
+  }
+}
+
+
+function appendToOverall(workbook, sourceSheet, overallSheetName, selectedColumns) {
+  const data = sourceSheet.getDataRange().getValues();
+  if (data.length < 2) return;
+
+  const headers = data[0];
+  const colIndexes = selectedColumns.map(h => headers.indexOf(h)).filter(i => i !== -1);
+  if (colIndexes.length === 0) return;
+
+  const rows = data.slice(1).map(row => colIndexes.map(idx => row[idx]));
+
+  let sheet = workbook.getSheetByName(overallSheetName);
+  if (!sheet) {
+    sheet = workbook.insertSheet(overallSheetName);
+    sheet.getRange(1, 1, 1, selectedColumns.length).setValues([selectedColumns]);
+  }
+
+  const existing = sheet.getDataRange().getValues().map(r => r.join('|'));
+  const newRows = rows.filter(r => !existing.includes(r.join('|')));
+
+  if (newRows.length > 0) {
+    sheet.getRange(sheet.getLastRow() + 1, 1, newRows.length, newRows[0].length).setValues(newRows);
+    Logger.log(`📌 Appended ${newRows.length} rows to "${overallSheetName}"`);
+  }
+}
+
+function processSheetPerSupplier(workbook, sheet, supplierHeader, selectedColumns, secondaryColumns) {
+  const data = sheet.getDataRange().getValues();
+  if (data.length < 2) return;
+
+  const headers = data[0];
+  const supplierIndex = headers.indexOf(supplierHeader);
+  const componentIndex = headers.indexOf(selectedColumns[0]);  // e.g., Component Name
+  if (supplierIndex === -1 || componentIndex === -1) return;
+
+  const formData = getLatestFormData(); // get metadata from the latest form response
+  const rowsBySupplier = {};
+
+  for (let i = 1; i < data.length; i++) {
+    const row = data[i];
+    const supplierRaw = row[supplierIndex]?.toString().trim();
+    if (!supplierRaw) continue;
+
+    const supplierNorm = normalizeSupplier(supplierRaw);
+    const componentName = row[componentIndex];
+
+    if (!rowsBySupplier[supplierNorm]) rowsBySupplier[supplierNorm] = [];
+    const enrichedRow = [
+      componentName,
+      formData['STR code']?.[0] || '',
+      formData['Project Name']?.[0] || '',
+      formData['Product']?.[0] || '',
+      formData['Current Project Milestone']?.[0] || '',
+      formData['OEM']?.[0] || '',
+      formData['BG']?.[0] || '',
+      formData['Sop Date']?.[0] || '',
+      formData['Cybersecurity Manager (CSM)']?.[0] || '',
+      formData['Cybersecurity Cheif Security Officer (CSO)']?.[0] || '',
+      formData['Project Point of Contact']?.[0] || '',
+      formData['Before Comments']?.[0] || ''
+    ];
+    rowsBySupplier[supplierNorm].push(enrichedRow);
+  }
+
+  for (const supplier in rowsBySupplier) {
+    const values = rowsBySupplier[supplier];
+    const secSheetName = `${supplier} - Project Info`;
+    const secHeaders = [
+      'Component Name',
+      'STR code',
+      'Project Name',
+      'Product',
+      'Current Project Milestone',
+      'OEM',
+      'BG',
+      'Sop Date',
+      'Cybersecurity Manager (CSM)',
+      'Cybersecurity Cheif Security Officer (CSO)',
+      'Project Point of Contact',
+      'Before Comments'
+    ];
+
+    const secSheet = getOrCreateSheet(workbook, secSheetName, secHeaders);
+    appendUniqueRows(secSheet, values);
+  }
+}
+
+
+function normalizeSupplier(name) {
+  const norm = name.trim().toLowerCase();
+  return SUPPLIER_ALIASES[name] || SUPPLIER_ALIASES[norm] || name;
+}
+
+function getOrCreateSheet(workbook, name, headers) {
+  let sheet = workbook.getSheetByName(name);
+  if (!sheet) {
+    sheet = workbook.insertSheet(name);
+    sheet.getRange(1, 1, 1, headers.length).setValues([headers]);
+  }
+  return sheet;
+}
+
+function appendUniqueRows(sheet, rows) {
+  const existing = sheet.getDataRange().getValues().map(row => row.join('|'));
+  const newRows = rows.filter(row => !existing.includes(row.join('|')));
+
+  if (newRows.length > 0) {
+    sheet.getRange(sheet.getLastRow() + 1, 1, newRows.length, newRows[0].length).setValues(newRows);
+    Logger.log(`✅ Appended ${newRows.length} unique rows to sheet: "${sheet.getName()}"`);
+  } else {
+    Logger.log(`ℹ️ No new data to append to: "${sheet.getName()}"`);
+  }
+}
+
+function updateSecondarySheet(secondarySS, sourceSheet, supplierHeader, columnsToTrack) {
+  const data = sourceSheet.getDataRange().getValues();
+  if (data.length < 2) return;
+
+  const headers = data[0];
+  const supplierIdx = headers.indexOf(supplierHeader);
+  const colIndexes = columnsToTrack.map(h => headers.indexOf(h)).filter(i => i !== -1);
+
+  if (supplierIdx === -1 || colIndexes.length === 0) return;
+
+  const valuesBySupplier = {};
+
+  for (let i = 1; i < data.length; i++) {
+    const row = data[i];
+    const supplierRaw = row[supplierIdx]?.toString().trim();
+    if (!supplierRaw) continue;
+
+    const supplierNorm = normalizeSupplier(supplierRaw);
+    const key = `${supplierNorm} - Project Info`;
+    if (!valuesBySupplier[key]) valuesBySupplier[key] = [];
+    const rowData = colIndexes.map(idx => row[idx]);
+    valuesBySupplier[key].push(rowData);
+  }
+
+  for (const sheetName in valuesBySupplier) {
+    let sheet = secondarySS.getSheetByName(sheetName);
+    if (!sheet) {
+      sheet = secondarySS.insertSheet(sheetName);
+      sheet.getRange(1, 1, 1, columnsToTrack.length).setValues([columnsToTrack]);
+    }
+    appendUniqueRows(sheet, valuesBySupplier[sheetName]);
+  }
+}
+
+function getLatestFormData() {
+  const formSheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName('Form Responses 1'); // Or adjust to your form sheet name
+  const data = formSheet.getDataRange().getValues();
+  const headers = data[0];
+  const latestRow = data[data.length - 1];
+  const formData = {};
+
+  headers.forEach((h, i) => {
+    formData[h] = [latestRow[i]];
+  });
+
+  return formData;
+}
+
