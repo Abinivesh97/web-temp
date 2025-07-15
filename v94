@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<mxfile host="app.diagrams.net">
+  <diagram name="Merged ToE" id="ABCDE123">
+    <mxGraphModel dx="800" dy="600" grid="1" gridSize="10" guides="1" tooltips="1" connect="1" arrows="1" fold="1">
+      <root>
+        <mxCell id="0"/>
+        <mxCell id="1" parent="0"/>
+        
+        <!-- Border -->
+        <mxCell id="border" value="" style="rounded=0;strokeColor=red;dashed=1;" vertex="1" parent="1">
+          <mxGeometry x="20" y="20" width="860" height="540" as="geometry"/>
+        </mxCell>
+        
+        <!-- MCU block -->
+        <mxCell id="MCU" value="MCU - FS32K144" style="rounded=1;fillColor=#CCCCCC;fontStyle=1;" vertex="1" parent="1">
+          <mxGeometry x="200" y="120" width="300" height="260" as="geometry"/>
+        </mxCell>
+        
+        <!-- Functional blocks -->
+        <!-- Firmware -->
+        <mxCell id="FIRMWARE" value="FIRMWARE" style="rounded=1;fillColor=#A0C8F0;" vertex="1" parent="MCU">
+          <mxGeometry x="20" y="20" width="120" height="40" as="geometry"/>
+        </mxCell>
+        <!-- CONFIG -->
+        <mxCell id="CONFIG" value="CONFIG" style="rounded=1;fillColor=#A0C8F0;" vertex="1" parent="MCU">
+          <mxGeometry x="160" y="20" width="120" height="40" as="geometry"/>
+        </mxCell>
+        <!-- TARGET_TEMP_PWR -->
+        <mxCell id="TARGET_TEMP_PWR" value="TARGET_TEMP_PWR" style="rounded=1;fillColor=#A0C8F0;" vertex="1" parent="MCU">
+          <mxGeometry x="20" y="80" width="260" height="40" as="geometry"/>
+        </mxCell>
+        <!-- FUNC_INTERLOCK -->
+        <mxCell id="FUNC_INTERLOCK" value="FUNC_INTERLOCK" style="rounded=1;fillColor=#A0C8F0;" vertex="1" parent="MCU">
+          <mxGeometry x="20" y="140" width="120" height="40" as="geometry"/>
+        </mxCell>
+        <!-- TEMP_MEAS -->
+        <mxCell id="TEMP_MEAS" value="TEMP_MEAS" style="rounded=1;fillColor=#A0C8F0;" vertex="1" parent="MCU">
+          <mxGeometry x="160" y="140" width="120" height="40" as="geometry"/>
+        </mxCell>
+        <!-- HEATING_COOLANT_FLUID -->
+        <mxCell id="HEATING_COOLANT_FLUID" value="HEATING_COOLANT_FLUID" style="rounded=1;fillColor=#A0C8F0;" vertex="1" parent="MCU">
+          <mxGeometry x="20" y="200" width="260" height="40" as="geometry"/>
+        </mxCell>
+        <!-- CURRENT_MEAS -->
+        <mxCell id="CURRENT_MEAS" value="CURRENT_MEAS" style="rounded=1;fillColor=#A0C8F0;" vertex="1" parent="MCU">
+          <mxGeometry x="20" y="260" width="120" height="40" as="geometry"/>
+        </mxCell>
+        <!-- VOLTAGE_MEAS -->
+        <mxCell id="VOLTAGE_MEAS" value="VOLTAGE_MEAS" style="rounded=1;fillColor=#A0C8F0;" vertex="1" parent="MCU">
+          <mxGeometry x="160" y="260" width="120" height="40" as="geometry"/>
+        </mxCell>
+        
+        <!-- Interfaces -->
+        <!-- LIN transceiver -->
+        <mxCell id="LIN" value="LIN Transceiver" style="rounded=1;fillColor=#DFE8FF;" vertex="1" parent="1">
+          <mxGeometry x="80" y="200" width="120" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="LIN_arrow" style="edgeStyle=orthogonalEdgeStyle;rounded=0;endArrow=block;strokeColor=orange;" edge="1" parent="1" source="LIN" target="MCU">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        
+        <!-- JTAG debugger -->
+        <mxCell id="JTAG" value="Debugger (JTAG)" style="rounded=1;fillColor=#99FF99;" vertex="1" parent="1">
+          <mxGeometry x="520" y="200" width="120" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="JTAG_arrow" style="edgeStyle=orthogonalEdgeStyle;rounded=0;endArrow=block;strokeColor=orange;" edge="1" parent="1" source="JTAG" target="MCU">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        
+        <!-- HV connector and interlock -->
+        <mxCell id="HVCON" value="HV Connector\n(interlock)" style="rounded=1;fillColor=#AAAAAA;" vertex="1" parent="1">
+          <mxGeometry x="80" y="60" width="120" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="HV_arrow" style="edgeStyle=orthogonalEdgeStyle;rounded=0;endArrow=block;strokeColor=orange;" edge="1" parent="1" source="HVCON" target="MCU">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        
+        <!-- Ext watchdog -->
+        <mxCell id="WDTOE" value="EXT_WATCHDOG" style="rounded=1;fillColor=#0077CC;fontColor=#FFFFFF;" vertex="1" parent="1">
+          <mxGeometry x="80" y="320" width="120" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="WD_arrow" style="edgeStyle=orthogonalEdgeStyle;rounded=0;endArrow=block;strokeColor=orange;" edge="1" parent="1" source="WDTOE" target="MCU">
+          <mxGeometry relative="1" as="geometry"/>
+        </mxCell>
+        
+        <!-- ADC block -->
+        <mxCell id="ADC" value="ADC (LV/HV sensors)" style="rounded=1;fillColor=#FFCC99;" vertex="1" parent="1">
+          <mxGeometry x="480" y="340" width="140" height="80" as="geometry"/>
+        </mxCell>
+        <mxCell id="ADC_arrow" style="edgeStyle=orthogonalEdgeStyle;rounded=0;endArrow=block;strokeColor=orange;" edge="1" parent="1" source="ADC" target="MCU"/>
+        
+        <!-- Sensors/Resistors -->
+        <mxCell id="Temps" value="4× Temperature Sensors" style="rounded=1;fillColor=#99CCFF;" vertex="1" parent="1">
+          <mxGeometry x="200" y="420" width="140" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="Resistor" value="Resistor" style="rounded=1;fillColor=#CCCC99;" vertex="1" parent="1">
+          <mxGeometry x="360" y="420" width="100" height="40" as="geometry"/>
+        </mxCell>
+        <mxCell id="CurrentSensor" value="Current Sensor" style="rounded=1;fillColor=#CCCC99;" vertex="1" parent="1">
+          <mxGeometry x="520" y="420" width="120" height="60" as="geometry"/>
+        </mxCell>
+        
+        <mxCell id="Temps_arrow" style="edgeStyle=orthogonalEdgeStyle;rounded=0;endArrow=block;strokeColor=black;" edge="1" parent="1" source="Temps" target="MCU"/>
+        <mxCell id="Res_arrow" style="edgeStyle=orthogonalEdgeStyle;rounded=0;endArrow=block;strokeColor=black;" edge="1" parent="1" source="Resistor" target="MCU"/>
+        <mxCell id="Cur_arrow" style="edgeStyle=orthogonalEdgeStyle;rounded=0;endArrow=block;strokeColor=black;" edge="1" parent="1" source="CurrentSensor" target="ADC"/>
+        
+        <!-- Coolant Fluid block -->
+        <mxCell id="Coolant" value="Coolant Fluid" style="rounded=1;fillColor=#99CC99;" vertex="1" parent="1">
+          <mxGeometry x="200" y="500" width="140" height="60" as="geometry"/>
+        </mxCell>
+        <mxCell id="Coolant_arrow" style="edgeStyle=orthogonalEdgeStyle;rounded=0;endArrow=block;strokeColor=#008800;" edge="1" parent="1" source="Coolant" target="Temps"/>
+        <mxCell id="Coolant_arrow2" style="edgeStyle=orthogonalEdgeStyle;rounded=0;endArrow=block;strokeColor=#008800;" edge="1" parent="1" source="Coolant" target="HEATING_COOLANT_FLUID"/>
+        
+      </root>
+    </mxGraphModel>
+  </diagram>
+</mxfile>
