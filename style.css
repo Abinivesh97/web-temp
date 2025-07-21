@@ -1,0 +1,170 @@
+/* CSS Document */
+
+/* --- CSS Variables for Easy Theme Customization --- */
+:root {
+    --bg-dark: #0a192f;
+    --bg-light: #112240;
+    --text-primary: #ccd6f6;
+    --text-secondary: #8892b0;
+    --accent: #64ffda;
+    --accent-dark: #133141;
+    --border-color: #233554;
+    --font-sans: 'Lato', sans-serif;
+    --font-mono: 'Poppins', sans-serif;
+}
+
+/* --- Global Reset & Base Styles --- */
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+}
+
+body {
+    background-color: var(--bg-dark);
+    font-family: var(--font-sans);
+    color: var(--text-secondary);
+    line-height: 1.6;
+}
+
+.container {
+    max-width: 1200px;
+    margin: 0 auto;
+    padding: 40px 20px;
+}
+
+a {
+    text-decoration: none;
+    color: inherit;
+}
+
+/* --- Header & Navigation --- */
+header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding-bottom: 20px;
+    margin-bottom: 40px;
+    border-bottom: 1px solid var(--border-color);
+}
+
+header h1 {
+    font-family: var(--font-mono);
+    color: var(--text-primary);
+    font-size: 28px;
+}
+
+header h1 i {
+    color: var(--accent);
+    margin-right: 10px;
+}
+
+header nav a {
+    color: var(--text-secondary);
+    margin-left: 20px;
+    font-weight: bold;
+    transition: color 0.3s ease;
+}
+
+header nav a:hover {
+    color: var(--accent);
+}
+
+/* --- Main Grid Layout --- */
+.main-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 25px;
+}
+
+.grid-column h2 {
+    font-family: var(--font-mono);
+    color: var(--text-primary);
+    margin-bottom: 20px;
+    font-size: 22px;
+}
+
+.grid-column h2 i {
+    margin-right: 10px;
+    color: var(--accent);
+}
+
+/* --- Card Design --- */
+.card {
+    display: block;
+    background-color: var(--bg-light);
+    padding: 20px;
+    border-radius: 8px;
+    margin-bottom: 15px;
+    border: 1px solid transparent;
+    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
+    transition: transform 0.3s ease, box-shadow 0.3s ease, border-color 0.3s ease;
+}
+
+.card:hover {
+    transform: translateY(-5px);
+    box-shadow: 0 10px 20px rgba(0, 0, 0, 0.3);
+    border-color: var(--accent);
+}
+
+.card h3 {
+    font-family: var(--font-mono);
+    color: var(--text-primary);
+    font-size: 18px;
+    margin-bottom: 5px;
+    transition: color 0.3s ease;
+}
+
+.card p {
+    font-size: 14px;
+    color: var(--text-secondary);
+}
+
+.card:hover h3 {
+    color: var(--accent);
+}
+
+/* --- Footer --- */
+footer {
+    display: flex;
+    gap: 30px;
+    margin-top: 50px;
+    padding-top: 30px;
+    border-top: 1px solid var(--border-color);
+}
+
+.footer-box {
+    background-color: var(--bg-light);
+    padding: 20px;
+    border-radius: 8px;
+    flex: 1;
+}
+
+.footer-box h4 {
+    font-family: var(--font-mono);
+    color: var(--accent);
+    margin-bottom: 10px;
+}
+
+/* --- Responsive Design for Mobile --- */
+@media (max-width: 768px) {
+    header {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 15px;
+    }
+
+    header nav {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 10px;
+    }
+     header nav a {
+        margin-left: 0;
+    }
+
+    footer {
+        flex-direction: column;
+    }
+}

@@ -1,173 +1,121 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <title>Cyber Security Work Product Metrics</title>
-  <!-- Tailwind CDN -->
-  <script src="https://cdn.tailwindcss.com"></script>
-  <style>
-    .slide-in {
-      animation: slideIn 0.6s cubic-bezier(0.4, 0, 0.2, 1) forwards;
-    }
-    .slide-out {
-      animation: slideOut 0.6s cubic-bezier(0.4, 0, 0.2, 1) forwards;
-    }
-    @keyframes slideIn {
-      0% { opacity: 0; transform: translateX(100%); }
-      100% { opacity: 1; transform: translateX(0); }
-    }
-    @keyframes slideOut {
-      0% { opacity: 1; transform: translateX(0); }
-      100% { opacity: 0; transform: translateX(-100%); }
-    }
-    .slide-in-reverse {
-      animation: slideInReverse 0.6s cubic-bezier(0.4, 0, 0.2, 1) forwards;
-    }
-    .slide-out-reverse {
-      animation: slideOutReverse 0.6s cubic-bezier(0.4, 0, 0.2, 1) forwards;
-    }
-    @keyframes slideInReverse {
-      0% { opacity: 0; transform: translateX(-100%); }
-      100% { opacity: 1; transform: translateX(0); }
-    }
-    @keyframes slideOutReverse {
-      0% { opacity: 1; transform: translateX(0); }
-      100% { opacity: 0; transform: translateX(100%); }
-    }
-    .scrollbar-thin::-webkit-scrollbar {
-      width: 6px;
-      background: #f1f1f1;
-    }
-    .scrollbar-thin::-webkit-scrollbar-thumb {
-      background: #d1d5db;
-      border-radius: 4px;
-    }
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Valeo Cybersecurity Portal</title>
+
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@600;700&family=Lato:wght@400;700&display=swap" rel="stylesheet">
+
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+
+    <link href="https://unpkg.com/aos@2.3.1/dist/aos.css" rel="stylesheet">
+
+    <link rel="stylesheet" href="style.css">
 </head>
-<body class="bg-gray-100 min-h-screen flex flex-col">
-  <!-- Header -->
-  <header class="py-6 px-8 bg-white shadow text-2xl font-bold tracking-wide text-gray-800">
-    Cyber Security Work Product Metrics
-  </header>
-  <!-- Main Content -->
-  <main class="flex-1 flex items-center justify-center min-h-0">
-    <div id="mainContainer" class="relative w-[98vw] h-[calc(100vh-5.5rem)] max-w-none max-h-[calc(100vh-5.5rem)] bg-gray-50 rounded-2xl shadow-2xl flex overflow-hidden transition-all">
-      <!-- Page 1 (default visible) -->
-      <div id="page1" class="flex w-full h-full min-h-0">
-        <!-- Left -->
-        <div class="flex flex-col justify-between w-1/3 p-8 gap-8 h-full min-h-0">
-          <div class="bg-white rounded-2xl shadow-lg flex-1 flex items-center justify-center text-gray-700 text-2xl font-semibold m-0">
-            Text Box 1
-          </div>
-          <div class="bg-white rounded-2xl shadow-lg flex-1 flex items-center justify-center text-gray-700 text-2xl font-semibold m-0">
-            Text Box 2
-          </div>
-        </div>
-        <!-- Right -->
-        <div class="flex-1 flex flex-col relative items-center justify-center p-8 h-full min-h-0">
-          <!-- Arrow -->
-          <button id="toPage2"
-            class="absolute left-[-32px] top-1/2 -translate-y-1/2 bg-green-400 text-white rounded-full shadow-xl w-14 h-14 flex items-center justify-center hover:bg-green-700 transition"
-            aria-label="Next">
-            <svg width="32" height="32" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M9 8l8 8-8 8"/>
-            </svg>
-          </button>
-          <!-- PPT / IFrame Placeholder -->
-          <div class="bg-white rounded-2xl shadow-2xl w-full h-full flex items-center justify-center min-h-0">
-            <iframe src="your url"
-              frameborder="0"
-              allowfullscreen="true"
-              mozallowfullscreen="true"
-              webkitallowfullscreen="true"
-              class="w-full h-full rounded-2xl"></iframe>
-          </div>
-        </div>
-      </div>
-      <!-- Page 2 (hidden by default) -->
-      <div id="page2" class="hidden flex w-full h-full min-h-0">
-        <!-- Left Side (like page 1) -->
-        <div class="flex flex-col justify-between w-1/3 p-8 gap-8 h-full min-h-0">
-          <div class="bg-white rounded-2xl shadow-lg flex-1 flex items-center justify-center text-gray-700 text-2xl font-semibold m-0">
-            Text Box 1
-          </div>
-          <div class="bg-white rounded-2xl shadow-lg flex-1 flex items-center justify-center text-gray-700 text-2xl font-semibold m-0">
-            Text Box 2
-          </div>
-        </div>
-        <!-- Right Side -->
-        <div class="flex-1 flex flex-col p-8 relative h-full min-h-0">
-          <!-- Top Buttons -->
-          <div class="flex gap-8 mb-8">
-            <button class="flex-1 bg-blue-600 text-white rounded-2xl py-6 text-2xl font-extrabold shadow-2xl hover:bg-blue-700 transition duration-150">B1</button>
-            <button class="flex-1 bg-blue-600 text-white rounded-2xl py-6 text-2xl font-extrabold shadow-2xl hover:bg-blue-700 transition duration-150">B2</button>
-          </div>
+<body>
 
-          <!-- Scrollable Button Lists -->
-          <div class="flex gap-8 flex-1 min-h-0">
-            <!-- Left Box with 8 buttons -->
-            <div class="flex-1 bg-white rounded-2xl shadow-lg p-6 flex flex-col overflow-y-auto max-h-full scrollbar-thin min-h-0">
-              <button class="mb-4 bg-gray-100 rounded-xl p-4 font-medium text-gray-700 hover:bg-blue-100 transition">Left Option 1</button>
-              <button class="mb-4 bg-gray-100 rounded-xl p-4 font-medium text-gray-700 hover:bg-blue-100 transition">Left Option 2</button>
-              <button class="mb-4 bg-gray-100 rounded-xl p-4 font-medium text-gray-700 hover:bg-blue-100 transition">Left Option 3</button>
-              <button class="mb-4 bg-gray-100 rounded-xl p-4 font-medium text-gray-700 hover:bg-blue-100 transition">Left Option 4</button>
-              <button class="mb-4 bg-gray-100 rounded-xl p-4 font-medium text-gray-700 hover:bg-blue-100 transition">Left Option 5</button>
-              <button class="mb-4 bg-gray-100 rounded-xl p-4 font-medium text-gray-700 hover:bg-blue-100 transition">Left Option 6</button>
-              <button class="mb-4 bg-gray-100 rounded-xl p-4 font-medium text-gray-700 hover:bg-blue-100 transition">Left Option 7</button>
-              <button class="mb-0 bg-gray-100 rounded-xl p-4 font-medium text-gray-700 hover:bg-blue-100 transition">Left Option 8</button>
+    <div class="container">
+        <header data-aos="fade-down">
+            <h1><i class="fa-solid fa-shield-halved"></i> Cybersecurity Portal</h1>
+            <nav>
+                <a href="#">Cyberlab and CDO</a>
+                <a href="#">Customer Project Support</a>
+                <a href="#">Software Cybersecurity</a>
+            </nav>
+        </header>
+
+        <main class="main-grid">
+            <section class="grid-column" data-aos="fade-up">
+                <h2><i class="fa-solid fa-wand-magic-sparkles"></i> AI & Quick Access</h2>
+                <a href="#" class="card">
+                    <h3>VaRET</h3>
+                    <p>Vulnerability Recognition & Evaluation Tool</p>
+                </a>
+                <a href="#" class="card">
+                    <h3>VISA</h3>
+                    <p>Vehicle Information Security Assistant</p>
+                </a>
+                <a href="#" class="card">
+                    <h3>VDA</h3>
+                    <p>Virtual Drive Assistant</p>
+                </a>
+                <a href="#" class="card">
+                    <h3>AI4ALL</h3>
+                    <p>AI Tools and Resources Platform</p>
+                </a>
+            </section>
+
+            <section class="grid-column" data-aos="fade-up" data-aos-delay="100">
+                <h2><i class="fa-solid fa-file-lines"></i> Policies & Methodologies</h2>
+                <a href="#" class="card">
+                    <h3>Valeo Cybersecurity Policy</h3>
+                    <p>Group-level security regulations</p>
+                </a>
+                <a href="#" class="card">
+                    <h3>ISO-21434</h3>
+                    <p>Road vehicles — Cybersecurity engineering</p>
+                </a>
+                 <a href="#" class="card">
+                    <h3>GDPR</h3>
+                    <p>General Data Protection Regulation</p>
+                </a>
+                <a href="#" class="card">
+                    <h3>VIM Safety Workflow</h3>
+                    <p>Vehicle Infrastructure Management</p>
+                </a>
+                <a href="#" class="card">
+                    <h3>Valeo CSMS-V Policy</h3>
+                    <p>Cybersecurity Management System for Vehicles</p>
+                </a>
+            </section>
+
+            <section class="grid-column" data-aos="fade-up" data-aos-delay="200">
+                <h2><i class="fa-solid fa-thumbtack"></i> Notice Board & Resources</h2>
+                <a href="#" class="card">
+                    <h3>BSigner</h3>
+                    <p>Secure binary signing service</p>
+                </a>
+                <a href="#" class="card">
+                    <h3>CybTIGER</h3>
+                    <p>Cyber Threat Intelligence & Growth Engine</p>
+                </a>
+                <a href="#" class="card">
+                    <h3>Cybersecurity Maintenance Framework</h3>
+                    <p>Guidelines for post-development support</p>
+                </a>
+                <a href="#" class="card">
+                    <h3>New Joiner Hand Book</h3>
+                    <p>Onboarding resources and guides</p>
+                </a>
+                <a href="#" class="card">
+                    <h3>Org Chart</h3>
+                    <p>View the department structure</p>
+                </a>
+            </section>
+        </main>
+
+        <footer data-aos="fade-up">
+            <div class="footer-box">
+                <h4>Our Mission</h4>
+                <p>To provide end-to-end security solutions and expertise, ensuring compliance to Group CSMS policy and customer contractual obligations. Execute or support BG cybersecurity ring activities during the product life cycle.</p>
             </div>
-            <!-- Right Box with 6 buttons -->
-            <div class="flex-1 bg-white rounded-2xl shadow-lg p-6 flex flex-col overflow-y-auto max-h-full scrollbar-thin min-h-0">
-              <button class="mb-4 bg-gray-100 rounded-xl p-4 font-medium text-gray-700 hover:bg-blue-100 transition">Right Option 1</button>
-              <button class="mb-4 bg-gray-100 rounded-xl p-4 font-medium text-gray-700 hover:bg-blue-100 transition">Right Option 2</button>
-              <button class="mb-4 bg-gray-100 rounded-xl p-4 font-medium text-gray-700 hover:bg-blue-100 transition">Right Option 3</button>
-              <button class="mb-4 bg-gray-100 rounded-xl p-4 font-medium text-gray-700 hover:bg-blue-100 transition">Right Option 4</button>
-              <button class="mb-4 bg-gray-100 rounded-xl p-4 font-medium text-gray-700 hover:bg-blue-100 transition">Right Option 5</button>
-              <button class="mb-0 bg-gray-100 rounded-xl p-4 font-medium text-gray-700 hover:bg-blue-100 transition">Right Option 6</button>
+            <div class="footer-box">
+                <h4>Our Vision</h4>
+                <p>To become a preferred technical center for Vehicle & Product Cybersecurity solutions and services for all Business groups across all product lines of Valeo.</p>
             </div>
-          </div>
-          <!-- Back Arrow -->
-          <button id="toPage1"
-            class="absolute left-[-32px] top-1/2 -translate-y-1/2 bg-blue-600 text-white rounded-full shadow-xl w-14 h-14 flex items-center justify-center hover:bg-blue-700 transition"
-            aria-label="Back">
-            <svg width="32" height="32" fill="none" stroke="currentColor" stroke-width="2">
-              <path d="M23 8l-8 8 8 8"/>
-            </svg>
-          </button>
-        </div>
-      </div>
+        </footer>
     </div>
-  </main>
-  <script>
-    // Handle transition between pages
-    const page1 = document.getElementById('page1');
-    const page2 = document.getElementById('page2');
-    const toPage2Btn = document.getElementById('toPage2');
-    const toPage1Btn = document.getElementById('toPage1');
 
-    toPage2Btn.addEventListener('click', () => {
-      // Slide out page1, then show page2
-      page1.classList.add('slide-out');
-      setTimeout(() => {
-        page1.classList.add('hidden');
-        page1.classList.remove('slide-out');
-        page2.classList.remove('hidden');
-        page2.classList.add('slide-in');
-        setTimeout(() => page2.classList.remove('slide-in'), 650);
-      }, 600);
-    });
+    <script src="https://unpkg.com/aos@2.3.1/dist/aos.js"></script>
+    <script>
+      AOS.init({
+        duration: 800, // animation duration
+        once: true, // whether animation should happen only once - while scrolling down
+      });
+    </script>
 
-    toPage1Btn.addEventListener('click', () => {
-      // Slide out page2, then show page1
-      page2.classList.add('slide-out-reverse');
-      setTimeout(() => {
-        page2.classList.add('hidden');
-        page2.classList.remove('slide-out-reverse');
-        page1.classList.remove('hidden');
-        page1.classList.add('slide-in-reverse');
-        setTimeout(() => page1.classList.remove('slide-in-reverse'), 650);
-      }, 600);
-    });
-  </script>
 </body>
 </html>
