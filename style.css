@@ -1,170 +1,123 @@
-/* CSS Document */
-
-/* --- CSS Variables for Easy Theme Customization --- */
+/* --- CSS Variables for Professional Corporate Theme --- */
 :root {
-    --bg-dark: #0a192f;
-    --bg-light: #112240;
-    --text-primary: #ccd6f6;
-    --text-secondary: #8892b0;
-    --accent: #64ffda;
-    --accent-dark: #133141;
-    --border-color: #233554;
-    --font-sans: 'Lato', sans-serif;
-    --font-mono: 'Poppins', sans-serif;
+    --bg-main: #f8f9fa; /* Light grey background */
+    --bg-widget: #ffffff; /* Clean white for cards */
+    --text-primary: #212529; /* Dark slate grey for primary text */
+    --text-secondary: #6c757d; /* Lighter grey for secondary text */
+    --accent-blue: #005A9C; /* Professional Valeo blue */
+    --accent-hover: #003E6B;
+    --border-color: #dee2e6; /* Subtle border color */
+    --border-visible: #adb5bd; /* A more visible, darker border */
+    --shadow-color: rgba(0, 0, 0, 0.05);
+    --font-primary: 'Inter', sans-serif;
+    --font-headings: 'Poppins', sans-serif;
 }
 
-/* --- Global Reset & Base Styles --- */
-* {
-    margin: 0;
-    padding: 0;
-    box-sizing: border-box;
-}
-
+/* --- Global Styles & FINAL FIX: Background Image --- */
+/* --- Global Styles & Background Image --- */
 body {
-    background-color: var(--bg-dark);
-    font-family: var(--font-sans);
-    color: var(--text-secondary);
-    line-height: 1.6;
+    font-family: var(--font-primary);
+    color: var(--text-primary);
+    margin: 0;
+    background-color: var(--bg-main);
+    /* Change the filename inside url() to match your .png file */
+    background-image: 
+        linear-gradient(rgba(248, 249, 250, 0.92), rgba(248, 249, 250, 0.92)),
+        url('background.png'); 
+    background-attachment: fixed;
+    background-size: cover;
+    background-position: center;
+}
+.page-wrapper {
+    max-width: 1600px;
+    margin: 2rem auto;
+    padding: 2rem 3rem;
+    background-color: var(--bg-widget);
+    border-radius: 16px;
+    border: 1px solid var(--border-visible);
+    box-shadow: 0 10px 40px -10px var(--shadow-color);
 }
 
-.container {
-    max-width: 1200px;
-    margin: 0 auto;
-    padding: 40px 20px;
-}
-
-a {
+/* --- Header & Sidebar --- */
+header { display: flex; align-items: center; justify-content: space-between; padding-bottom: 20px; border-bottom: 1px solid var(--border-color); margin-bottom: 40px; }
+.header-left { display: flex; align-items: center; gap: 20px; }
+.portal-title { font-family: var(--font-headings); font-size: 24px; }
+.main-nav a {
+    margin: 0 0 0 15px;
+    font-weight: 500;
     text-decoration: none;
-    color: inherit;
-}
-
-/* --- Header & Navigation --- */
-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding-bottom: 20px;
-    margin-bottom: 40px;
-    border-bottom: 1px solid var(--border-color);
-}
-
-header h1 {
-    font-family: var(--font-mono);
-    color: var(--text-primary);
-    font-size: 28px;
-}
-
-header h1 i {
-    color: var(--accent);
-    margin-right: 10px;
-}
-
-header nav a {
     color: var(--text-secondary);
-    margin-left: 20px;
-    font-weight: bold;
-    transition: color 0.3s ease;
-}
-
-header nav a:hover {
-    color: var(--accent);
-}
-
-/* --- Main Grid Layout --- */
-.main-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
-    gap: 25px;
-}
-
-.grid-column h2 {
-    font-family: var(--font-mono);
-    color: var(--text-primary);
-    margin-bottom: 20px;
-    font-size: 22px;
-}
-
-.grid-column h2 i {
-    margin-right: 10px;
-    color: var(--accent);
-}
-
-/* --- Card Design --- */
-.card {
-    display: block;
-    background-color: var(--bg-light);
-    padding: 20px;
-    border-radius: 8px;
-    margin-bottom: 15px;
-    border: 1px solid transparent;
-    box-shadow: 0 5px 15px rgba(0, 0, 0, 0.2);
-    transition: transform 0.3s ease, box-shadow 0.3s ease, border-color 0.3s ease;
-}
-
-.card:hover {
-    transform: translateY(-5px);
-    box-shadow: 0 10px 20px rgba(0, 0, 0, 0.3);
-    border-color: var(--accent);
-}
-
-.card h3 {
-    font-family: var(--font-mono);
-    color: var(--text-primary);
-    font-size: 18px;
-    margin-bottom: 5px;
-    transition: color 0.3s ease;
-}
-
-.card p {
     font-size: 14px;
-    color: var(--text-secondary);
+    padding: 10px 18px;
+    border-radius: 8px;
+    border: 1px solid var(--border-visible);
+    background-color: var(--bg-widget);
+    transition: all 0.2s ease;
 }
+.main-nav a:hover {
+    background-color: var(--accent-blue);
+    color: #fff;
+    border-color: var(--accent-blue);
+}
+.burger-menu { background: none; border: 1px solid var(--border-color); border-radius: 8px; width: 45px; height: 45px; cursor: pointer; color: var(--text-primary); font-size: 18px; }
+.sidebar { position: fixed; top: 0; left: 0; width: 320px; height: 100%; background-color: var(--bg-widget); border-right: 1px solid var(--border-color); padding: 0; z-index: 1001; transform: translateX(-100%); transition: transform 0.3s ease-in-out; display: flex; flex-direction: column; }
+.sidebar.active { transform: translateX(0); }
+.sidebar-header { display: flex; justify-content: space-between; align-items: center; padding: 20px 25px; border-bottom: 1px solid var(--border-color); }
+.sidebar-title { font-family: var(--font-headings); margin: 0; color: var(--accent-blue); font-size: 18px; }
+.sidebar ul { list-style: none; padding: 10px; margin: 0; }
+.sidebar ul li a { display: block; padding: 12px 15px; border-radius: 6px; color: var(--text-secondary); text-decoration: none; font-weight: 500; }
+.sidebar ul li a:hover { background-color: var(--bg-main); color: var(--accent-blue); }
+.close-btn { font-size: 28px; background: none; border: none; cursor: pointer; color: var(--text-secondary); }
+.overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background-color: rgba(0,0,0,0.4); z-index: 1000; opacity: 0; visibility: hidden; transition: opacity 0.3s ease; }
+.overlay.active { opacity: 1; visibility: visible; }
 
-.card:hover h3 {
-    color: var(--accent);
-}
+/* --- Main Layout Grid --- */
+.main-layout { display: grid; grid-template-columns: 380px 1fr; grid-template-rows: auto auto 1fr; gap: 30px; align-items: stretch; }
+#quick-access-section { grid-column: 1; grid-row: 1; }
+#ai-tools-section { grid-column: 1; grid-row: 2; }
+#vision-section { grid-column: 1; grid-row: 3; }
+#notice-board-section { grid-column: 2; grid-row: 1 / span 2; }
+#mission-section { grid-column: 2; grid-row: 3; }
+
+/* --- General Widget Styling --- */
+.widget { background-color: var(--bg-widget); border: 1px solid var(--border-visible); border-radius: 12px; overflow: hidden; display: flex; flex-direction: column; }
+.widget-header { display: flex; align-items: center; padding: 18px 25px; font-family: var(--font-headings); font-size: 18px; font-weight: 600; }
+.widget-header span i { margin-right: 12px; color: var(--accent-blue); }
+
+/* --- Quick Access --- */
+#quick-access-section { padding: 0; overflow: visible; border: none; background: none; }
+#quick-access-section .widget-header { cursor: pointer; justify-content: flex-start; gap: 10px; border: 1px solid var(--border-visible); border-radius: 8px; background-color: var(--bg-widget); }
+#quick-access-section.open .widget-header { border-bottom-left-radius: 0; border-bottom-right-radius: 0; }
+#quick-access-section .widget-header .arrow-icon { margin-left: auto; transition: transform 0.3s ease; }
+#quick-access-section.open .arrow-icon { transform: rotate(180deg); }
+.dropdown-content { background-color: var(--bg-widget); border: 1px solid var(--border-visible); border-top: none; border-bottom-left-radius: 8px; border-bottom-right-radius: 8px; max-height: 0; overflow: hidden; transition: max-height 0.3s ease-out; padding: 0 10px; }
+#quick-access-section.open .dropdown-content { max-height: 200px; padding: 10px; }
+.dropdown-item { display: block; padding: 12px 15px; color: var(--text-secondary); text-decoration: none; border-radius: 6px; font-weight: 500; }
+.dropdown-item:hover { color: var(--accent-blue); background-color: #f1f3f5; }
+
+/* --- AI Tools Section --- */
+#ai-tools-section .widget-header { border-bottom: 1px solid var(--border-color); }
+.ai-tools-container { position: relative; height: 320px; padding: 25px; cursor: grab; display: flex; align-items: center; justify-content: center; overflow: hidden; flex-grow: 1; }
+.ai-card { position: absolute; width: 280px; height: 280px; border-radius: 12px; transition: all 0.4s ease; display: flex; align-items: flex-end; justify-content: center; overflow: hidden; box-shadow: 0 10px 25px -10px rgba(0,0,0,0.2); }
+.ai-card img { width: 100%; height: 100%; object-fit: cover; position: absolute; z-index: 1; }
+.ai-card-title { position: relative; z-index: 2; font-family: var(--font-headings); color: #fff; font-size: 24px; padding: 25px; text-shadow: 1px 1px 8px rgba(0,0,0,0.6); width: 100%; text-align: center; background: linear-gradient(to top, rgba(0,0,0,0.7), transparent); }
+
+/* --- Vision, Mission & Notice Board --- */
+.info-box, .large-box { padding: 25px; }
+.info-box h3, .large-box .widget-header { font-family: var(--font-headings); display: flex; align-items: center; gap: 12px; margin-bottom: 15px; color: var(--text-primary); padding: 0; border-bottom: 1px solid var(--border-color); padding-bottom: 15px; cursor: default; }
+.info-box h3 i, .large-box .widget-header i { color: var(--accent-blue); }
+.info-box p { color: var(--text-secondary); font-size: 16px; line-height: 1.7; margin: 0; }
+.large-box { flex-grow: 1; }
+.large-box ul { list-style: none; padding: 0; margin: 0; }
+.large-box li { padding: 12px 0; border-bottom: 1px solid #f1f3f5; }
+.large-box li:last-child { border-bottom: none; }
+.large-box li a { color: var(--text-secondary); font-weight: 500; text-decoration: none; }
+.large-box li a:hover { color: var(--accent-blue); }
 
 /* --- Footer --- */
-footer {
-    display: flex;
-    gap: 30px;
-    margin-top: 50px;
-    padding-top: 30px;
-    border-top: 1px solid var(--border-color);
-}
+footer { text-align: center; padding-top: 30px; margin-top: 40px; border-top: 1px solid var(--border-color); color: var(--text-secondary); font-size: 14px; }
 
-.footer-box {
-    background-color: var(--bg-light);
-    padding: 20px;
-    border-radius: 8px;
-    flex: 1;
-}
-
-.footer-box h4 {
-    font-family: var(--font-mono);
-    color: var(--accent);
-    margin-bottom: 10px;
-}
-
-/* --- Responsive Design for Mobile --- */
-@media (max-width: 768px) {
-    header {
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 15px;
-    }
-
-    header nav {
-        display: flex;
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 10px;
-    }
-     header nav a {
-        margin-left: 0;
-    }
-
-    footer {
-        flex-direction: column;
-    }
-}
+/* --- Responsive Adjustments --- */
+@media (max-width: 1200px) { .main-nav { display: none; } }
+@media (max-width: 992px) { .main-layout { grid-template-columns: 1fr; grid-template-rows: auto; } #quick-access-section, #ai-tools-section, #vision-section, #notice-board-section, #mission-section { grid-column: 1; grid-row: auto; } .page-wrapper { margin: 1rem; padding: 1.5rem; max-width: 100%;} }
+@media (max-width: 480px) { .ai-card { width: 220px; height: 220px; } .ai-tools-container { height: 260px; } .page-wrapper { padding: 1rem; } .portal-title { font-size: 18px; } }

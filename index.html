@@ -3,119 +3,109 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Valeo Cybersecurity Portal</title>
-
+    <title>Cybersecurity Portal | Valeo</title>
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-    <link href="https://fonts.googleapis.com/css2?family=Poppins:wght@600;700&family=Lato:wght@400;700&display=swap" rel="stylesheet">
-
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700&family=Poppins:wght@600;700&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
-
-    <link href="https://unpkg.com/aos@2.3.1/dist/aos.css" rel="stylesheet">
-
     <link rel="stylesheet" href="style.css">
 </head>
 <body>
 
-    <div class="container">
-        <header data-aos="fade-down">
-            <h1><i class="fa-solid fa-shield-halved"></i> Cybersecurity Portal</h1>
-            <nav>
-                <a href="#">Cyberlab and CDO</a>
+    <aside id="sidebar" class="sidebar">
+        <div class="sidebar-header">
+             <h3 class="sidebar-title"><i class="fa-solid fa-file-lines"></i> Policies & Methodologies</h3>
+             <button id="closeSidebarBtn" class="close-btn">&times;</button>
+        </div>
+        <ul>
+            <li><a href="#">Valeo Cybersecurity Policy</a></li>
+            <li><a href="#">ISO-21434</a></li>
+            <li><a href="#">TISAX / Project Development</a></li>
+            <li><a href="#">GDPR</a></li>
+            <li><a href="#">VIM Safety Workflow</a></li>
+        </ul>
+    </aside>
+    <div id="overlay" class="overlay"></div>
+
+    <div class="page-wrapper">
+        <header>
+            <div class="header-left">
+                <button class="burger-menu" id="openSidebarBtn">
+                    <i class="fa-solid fa-bars"></i>
+                </button>
+                <h1 class="portal-title">Cybersecurity Portal</h1>
+            </div>
+            <nav class="main-nav">
+                <a href="#">CDO and Lab</a>
                 <a href="#">Customer Project Support</a>
-                <a href="#">Software Cybersecurity</a>
+                <a href="#">Software Cybersecurity & R&I</a>
             </nav>
         </header>
 
-        <main class="main-grid">
-            <section class="grid-column" data-aos="fade-up">
-                <h2><i class="fa-solid fa-wand-magic-sparkles"></i> AI & Quick Access</h2>
-                <a href="#" class="card">
-                    <h3>VaRET</h3>
-                    <p>Vulnerability Recognition & Evaluation Tool</p>
-                </a>
-                <a href="#" class="card">
-                    <h3>VISA</h3>
-                    <p>Vehicle Information Security Assistant</p>
-                </a>
-                <a href="#" class="card">
-                    <h3>VDA</h3>
-                    <p>Virtual Drive Assistant</p>
-                </a>
-                <a href="#" class="card">
-                    <h3>AI4ALL</h3>
-                    <p>AI Tools and Resources Platform</p>
-                </a>
+        <main class="main-layout">
+            <section id="quick-access-section" class="widget">
+                <button class="widget-header" id="quickAccessToggle">
+                    <span><i class="fa-solid fa-bolt"></i> Quick Access</span>
+                    <i class="fa-solid fa-chevron-down arrow-icon"></i>
+                </button>
+                <div class="dropdown-content">
+                    <a href="#" class="dropdown-item">BSigner</a>
+                    <a href="#" class="dropdown-item">CybTIGER</a>
+                    <a href="#" class="dropdown-item">New Joiner Handbook</a>
+                </div>
             </section>
 
-            <section class="grid-column" data-aos="fade-up" data-aos-delay="100">
-                <h2><i class="fa-solid fa-file-lines"></i> Policies & Methodologies</h2>
-                <a href="#" class="card">
-                    <h3>Valeo Cybersecurity Policy</h3>
-                    <p>Group-level security regulations</p>
-                </a>
-                <a href="#" class="card">
-                    <h3>ISO-21434</h3>
-                    <p>Road vehicles — Cybersecurity engineering</p>
-                </a>
-                 <a href="#" class="card">
-                    <h3>GDPR</h3>
-                    <p>General Data Protection Regulation</p>
-                </a>
-                <a href="#" class="card">
-                    <h3>VIM Safety Workflow</h3>
-                    <p>Vehicle Infrastructure Management</p>
-                </a>
-                <a href="#" class="card">
-                    <h3>Valeo CSMS-V Policy</h3>
-                    <p>Cybersecurity Management System for Vehicles</p>
-                </a>
+            <section id="ai-tools-section" class="widget">
+                <div class="widget-header"><span><i class="fa-solid fa-robot"></i> AI Tools</span></div>
+                <div id="aiToolsContainer" class="ai-tools-container">
+                    <div class="ai-card">
+                        <img src="https://images.unsplash.com/photo-1518770660439-4636190af475?q=80&w=800" alt="VaRET">
+                        <div class="ai-card-title">VaRET</div>
+                    </div>
+                    <div class="ai-card">
+                        <img src="https://images.unsplash.com/photo-1550751827-4bd374c3f58b?q=80&w=800" alt="VISA">
+                        <div class="ai-card-title">VISA</div>
+                    </div>
+                    <div class="ai-card">
+                        <img src="https://images.unsplash.com/photo-1593349480503-685d3a4c5979?q=80&w=800" alt="VDA">
+                        <div class="ai-card-title">VDA</div>
+                    </div>
+                    <div class="ai-card">
+                        <img src="https://images.unsplash.com/photo-1620712943543-2858200f7426?q=80&w=800" alt="AI4ALL">
+                        <div class="ai-card-title">AI4ALL</div>
+                    </div>
+                </div>
+            </section>
+            
+            <section id="vision-section" class="widget info-box">
+                <h3><i class="fa-solid fa-eye"></i> Our Vision</h3>
+                <p>To become a preferred technical center for Vehicle & Product Cybersecurity solutions and services for all Business groups across all product lines of Valeo.</p>
+            </section>
+            
+            <section id="notice-board-section" class="widget large-box">
+                <div class="widget-header"><span><i class="fa-solid fa-thumbtack"></i> Notice Board</span></div>
+                <ul>
+                    <li><a href="#">[Urgent] Mandatory training on ISO-21434.</a></li>
+                    <li><a href="#">New Privacy Request Form has been uploaded.</a></li>
+                    <li><a href="#">Q2 Lessons Learnt & Best Practices published.</a></li>
+                    <li><a href="#">New security bulletin regarding CVE-2025-XXXX.</a></li>
+                    <li><a href="#">Team event planned for next month, details to follow.</a></li>
+                </ul>
             </section>
 
-            <section class="grid-column" data-aos="fade-up" data-aos-delay="200">
-                <h2><i class="fa-solid fa-thumbtack"></i> Notice Board & Resources</h2>
-                <a href="#" class="card">
-                    <h3>BSigner</h3>
-                    <p>Secure binary signing service</p>
-                </a>
-                <a href="#" class="card">
-                    <h3>CybTIGER</h3>
-                    <p>Cyber Threat Intelligence & Growth Engine</p>
-                </a>
-                <a href="#" class="card">
-                    <h3>Cybersecurity Maintenance Framework</h3>
-                    <p>Guidelines for post-development support</p>
-                </a>
-                <a href="#" class="card">
-                    <h3>New Joiner Hand Book</h3>
-                    <p>Onboarding resources and guides</p>
-                </a>
-                <a href="#" class="card">
-                    <h3>Org Chart</h3>
-                    <p>View the department structure</p>
-                </a>
+            <section id="mission-section" class="widget info-box">
+                <h3><i class="fa-solid fa-bullseye"></i> Our Mission</h3>
+                <p>To provide end-to-end security solutions, services and expertise ensuring compliance to Group CSMS policy and customer contractual obligations.</p>
             </section>
         </main>
-
-        <footer data-aos="fade-up">
-            <div class="footer-box">
-                <h4>Our Mission</h4>
-                <p>To provide end-to-end security solutions and expertise, ensuring compliance to Group CSMS policy and customer contractual obligations. Execute or support BG cybersecurity ring activities during the product life cycle.</p>
-            </div>
-            <div class="footer-box">
-                <h4>Our Vision</h4>
-                <p>To become a preferred technical center for Vehicle & Product Cybersecurity solutions and services for all Business groups across all product lines of Valeo.</p>
-            </div>
+        
+        <footer>
+            <p>&copy; 2025 Valeo Cybersecurity. All Rights Reserved.</p>
         </footer>
     </div>
 
-    <script src="https://unpkg.com/aos@2.3.1/dist/aos.js"></script>
     <script>
-      AOS.init({
-        duration: 800, // animation duration
-        once: true, // whether animation should happen only once - while scrolling down
-      });
+        const openSidebarBtn=document.getElementById("openSidebarBtn"),closeSidebarBtn=document.getElementById("closeSidebarBtn"),sidebar=document.getElementById("sidebar"),overlay=document.getElementById("overlay");openSidebarBtn.addEventListener("click",()=>{sidebar.classList.add("active"),overlay.classList.add("active")});const closeSidebar=()=>{sidebar.classList.remove("active"),overlay.classList.remove("active")};closeSidebarBtn.addEventListener("click",closeSidebar),overlay.addEventListener("click",closeSidebar),document.getElementById("quickAccessToggle").addEventListener("click",()=>{document.getElementById("quick-access-section").classList.toggle("open")});const container=document.getElementById("aiToolsContainer");let cards=Array.from(container.querySelectorAll(".ai-card"));const updateCardPositions=()=>{cards.forEach((e,t)=>{e.style.transform=`translateY(${15*t}px) scale(${1-.05*t})`,e.style.zIndex=cards.length-t,e.style.opacity=`${1-.15*t}`})};container.addEventListener("wheel",e=>{e.preventDefault(),e.deltaY>0?cards.push(cards.shift()):cards.unshift(cards.pop()),updateCardPositions()}),updateCardPositions();
     </script>
-
 </body>
 </html>
