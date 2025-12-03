@@ -1,0 +1,102 @@
+import os
+import argparse
+import boto3
+from botocore.client import Config
+import threading
+from boto3.s3.transfer import TransferConfig
+from tqdm import tqdm
+
+#configuration
+AWS_ACCESS_KEY = '' 
+AWS_SECRET_KEY = ''
+REGION_NAME    = ''
+BUCKET_NAME    = ''
+
+URL_EXPIRATION_SECONDS = 12 * 60 * 60 
+
+class ProgressPercentage(object):
+    def __init__(self, filename):
+        self._filename = filename
+        self._size = float(os.path.getsize(filename))
+        self._seen_so_far = 0
+        self._lock = threading.Lock()
+        self._pbar = tqdm(
+            total=self._size, 
+            unit='B', 
+            unit_scale=True, 
+            desc=f"Uploading {os.path.basename(filename)}",
+            ncols=80
+        )
+
+    def __call__(self, bytes_amount):
+        with self._lock:
+            self._seen_so_far += bytes_amount
+            self._pbar.update(bytes_amount)
+
+    def close(self):
+        self._pbar.close()
+
+def upload_and_generate_link(file_path):
+    if not os.path.exists(file_path):
+        print(f"❌ Error: File '{file_path}' not found.")
+        return
+
+    file_name = os.path.basename(file_path)
+
+    # --- THE FIX IS HERE ---
+    # We force the 's3v4' signature and the explicit Regional URL
+    s3_client = boto3.client(
+        's3', 
+        region_name=REGION_NAME,
+        aws_access_key_id=AWS_ACCESS_KEY,
+        aws_secret_access_key=AWS_SECRET_KEY,
+        config=Config(signature_version='s3v4'), 
+        endpoint_url=f'https://s3.{REGION_NAME}.amazonaws.com'
+    )
+    # -----------------------
+
+    config = TransferConfig(
+        multipart_threshold=1024 * 25, 
+        max_concurrency=10,
+        multipart_chunksize=1024 * 25,
+        use_threads=True
+    )
+
+    print(f"🚀 Starting upload to Bucket: {BUCKET_NAME}")
+    
+    try:
+        progress = ProgressPercentage(file_path)
+        
+        s3_client.upload_file(
+            file_path, 
+            BUCKET_NAME, 
+            file_name, 
+            Config=config,
+            Callback=progress,
+            ExtraArgs={'ContentType': 'application/octet-stream'}
+        )
+        
+        progress.close()
+        print("\n✅ Upload Complete.")
+
+        # Generate Link
+        url = s3_client.generate_presigned_url(
+            'get_object',
+            Params={'Bucket': BUCKET_NAME, 'Key': file_name},
+            ExpiresIn=URL_EXPIRATION_SECONDS
+        )
+
+        print("-" * 60)
+        print("🔗 FOTA URL (Valid for 12 Hours):")
+        print(url)
+        print("-" * 60)
+
+    except Exception as e:
+        print(f"\n❌ Error: {e}")
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser()
+    parser.add_argument('-u', '--upload', required=True, help='Path to firmware file')
+    args = parser.parse_args()
+
+    upload_and_generate_link(args.upload)
